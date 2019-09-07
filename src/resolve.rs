@@ -845,7 +845,7 @@ mod tests {
     use super::*;
     use crate::tests::*;
     use alpm::SigLevel;
-    use simplelog::{Config, LevelFilter, TermLogger, TerminalMode};
+    use simplelog::{ConfigBuilder, LevelFilter, TermLogger, TerminalMode};
 
     struct TestActions {
         build: Vec<String>,
@@ -4030,10 +4030,7 @@ mod tests {
     fn init_logger() {
         let _ = TermLogger::init(
             LevelFilter::Trace,
-            Config {
-                filter_allow: Some(&["aur_depend"]),
-                ..Config::default()
-            },
+            ConfigBuilder::new().add_filter_allow_str("aur_depends").build(),
             TerminalMode::Stderr,
         );
     }
@@ -4399,7 +4396,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_resolve_targets() {
-        init_logger();
+        //init_logger();
         //let raur = raur();
         let raur = raur::Handle::default();
         let alpm = alpm();
@@ -4412,11 +4409,11 @@ mod tests {
         });
 
         let actions = handle
-            //.resolve_targets(&["ros-melodic-desktop-full"])
+            .resolve_targets(&["ros-melodic-desktop-full"])
             //.resolve_targets(&["yay", "yay-bin", "yay-git"])
             //.resolve_targets(&["yay", "pikaur", "pacman", "glibc", "0ad", "spotify"])
             //.resolve_targets(&["0ad"])
-            .resolve_targets(&["linux-pf"])
+            //.resolve_targets(&["linux-pf"])
             //.resolve_targets(&["ros-melodic-desktop-full", "yay"])
             //.resolve_targets(&["ignition-common"])
             .unwrap();
