@@ -105,3 +105,11 @@ pub struct AurUpdate<'a> {
     /// The AUR package.
     pub remote: raur_ext::Package,
 }
+
+/// Collection of AUR updates and missing packages
+pub struct AurUpdates<'a> {
+    /// The updates.
+    pub updates: Vec<AurUpdate<'a>>,
+    /// Foreign that were not found in the AUR.
+    pub missing: Vec<alpm::Package<'a>>,
+}

@@ -1,4 +1,4 @@
-use crate::actions::{Actions, AurPackage, AurUpdate, Base, Conflict, RepoPackage};
+use crate::actions::{Actions, AurPackage, AurUpdate, Base, Conflict, RepoPackage, AurUpdates};
 use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
 use crate::{Error, Flags};
 
@@ -126,7 +126,7 @@ where
     /// # Example
     ///
     /// ```no_run
-    /// # use aur_depends::Error;
+    /// # use aur_depends::{Error, AurUpdates};
     /// # fn run() -> Result<(), Error> {
     /// use std::collections::HashSet;
     /// use alpm::Alpm;
@@ -141,23 +141,25 @@ where
     ///
     /// let updates = resolver.aur_updates()?;
     ///
-    /// for update in updates {
+    /// for update in updates.updates {
     ///     println!("update: {}: {} -> {}", update.local.name(), update.local.version(),
     ///     update.remote.version);
     /// }
     /// # Ok (())
     /// # }
     /// ```
-    pub fn aur_updates(&mut self) -> Result<Vec<AurUpdate>, Error> {
+    pub fn aur_updates(&mut self) -> Result<AurUpdates, Error> {
         let local_pkgs = self
             .alpm
             .localdb()
             .pkgs()?
+            .filter(|p| self.alpm.syncdbs().pkg(p.name()).is_none())
             .filter(|pkg| !pkg.should_ignore())
             .collect::<Vec<_>>();
 
         let local_pkg_names = local_pkgs.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
         self.raur.cache_info(self.cache, &local_pkg_names)?;
+        let mut missing = Vec::new();
 
         let to_upgrade = local_pkgs
             .into_iter()
@@ -176,13 +178,16 @@ where
                         };
                         return Some(up);
                     }
+                } else {
+                    missing.push(local_pkg);
                 }
 
                 None
             })
             .collect::<Vec<_>>();
 
-        Ok(to_upgrade)
+        let updates = AurUpdates { updates: to_upgrade, missing };
+        Ok(updates)
     }
 
     /// Resolve a list of targets.
@@ -4362,7 +4367,7 @@ mod tests {
         let raur = raur();
         let mut cache = HashSet::new();
         let mut handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
-        let pkgs = handle.aur_updates().unwrap();
+        let pkgs = handle.aur_updates().unwrap().updates;
         let pkgs = pkgs
             .iter()
             .map(|p| p.remote.name.as_str())
@@ -4382,7 +4387,7 @@ mod tests {
             &raur,
             Flags::new() | Flags::ENABLE_DOWNGRADE,
         );
-        let pkgs = handle.aur_updates().unwrap();
+        let pkgs = handle.aur_updates().unwrap().updates;
         let pkgs = pkgs
             .iter()
             .map(|p| p.remote.name.as_str())
@@ -4395,8 +4400,8 @@ mod tests {
     #[ignore]
     fn test_resolve_targets() {
         init_logger();
-        let raur = raur();
-        //let raur = raur::Handle::default();
+        //let raur = raur();
+        let raur = raur::Handle::default();
         let alpm = alpm();
         let mut cache = HashSet::new();
         let flags = Flags::new() & !Flags::TARGET_PROVIDES & !Flags::MISSING_PROVIDES;
@@ -4411,7 +4416,7 @@ mod tests {
             //.resolve_targets(&["yay", "yay-bin", "yay-git"])
             //.resolve_targets(&["yay", "pikaur", "pacman", "glibc", "0ad", "spotify"])
             //.resolve_targets(&["0ad"])
-            .resolve_targets(&["pacman-git"])
+            .resolve_targets(&["linux-pf"])
             //.resolve_targets(&["ros-melodic-desktop-full", "yay"])
             //.resolve_targets(&["ignition-common"])
             .unwrap();
