@@ -12,7 +12,7 @@ pub struct Actions<'a> {
     pub duplicates: Vec<String>,
     /// Some of the targets or dependencies could not be satisfied. This should be treated as
     /// a hard error.
-    pub missing: Vec<Vec<String>>,
+    pub missing: Vec<Missing>,
     /// Targets that are up to date.
     pub unneeded: Vec<String>,
     /// Aur packages to build.
@@ -112,4 +112,13 @@ pub struct AurUpdates<'a> {
     pub updates: Vec<AurUpdate<'a>>,
     /// Foreign that were not found in the AUR.
     pub missing: Vec<alpm::Package<'a>>,
+}
+
+/// A package that could not be resolved.
+#[derive(Debug)]
+pub struct Missing {
+    /// The Dependency we failed to satisfy.
+    pub dep: String,
+    /// The dependency path leadsing to pkg.
+    pub stack: Vec<String>,
 }

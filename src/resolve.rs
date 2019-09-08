@@ -1,4 +1,6 @@
-use crate::actions::{Actions, AurPackage, AurUpdate, AurUpdates, Base, Conflict, RepoPackage};
+use crate::actions::{
+    Actions, AurPackage, AurUpdate, AurUpdates, Base, Conflict, Missing, RepoPackage,
+};
 use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
 use crate::Error;
 use bitflags::bitflags;
@@ -252,7 +254,10 @@ where
                 continue;
             }
 
-            self.actions.missing.push(vec![pkg.to_string()]);
+            self.actions.missing.push(Missing {
+                dep: pkg.to_string(),
+                stack: Vec::new(),
+            });
         }
 
         self.cache_aur_pkgs_recursive(&aur_targets, true)?;
@@ -280,9 +285,10 @@ where
             let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, true)? {
                 pkg.clone()
             } else {
-                let mut stack = self.stack.clone();
-                stack.push(dep.to_string());
-                self.actions.missing.push(stack);
+                self.actions.missing.push(Missing {
+                    dep: dep.to_string(),
+                    stack: self.stack.clone(),
+                });
                 continue;
             };
 
@@ -421,9 +427,10 @@ where
                 let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false)? {
                     pkg.clone()
                 } else {
-                    let mut stack = self.stack.clone();
-                    stack.push(dep.to_string());
-                    self.actions.missing.push(stack);
+                    self.actions.missing.push(Missing {
+                        dep: dep.to_string(),
+                        stack: self.stack.clone(),
+                    });
                     continue;
                 };
 
@@ -458,9 +465,10 @@ where
                 if let Some(pkg) = self.find_repo_satisfier(dep.to_string()) {
                     self.resolve_repo_pkg(pkg, false)?;
                 } else {
-                    let mut stack = self.stack.clone();
-                    stack.push(dep.to_string());
-                    self.actions.missing.push(stack);
+                    self.actions.missing.push(Missing {
+                        dep: dep.to_string(),
+                        stack: Vec::new(),
+                    });
                 }
             }
         }
