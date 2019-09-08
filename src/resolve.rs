@@ -6,7 +6,7 @@ use bitflags::bitflags;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use alpm::{Alpm, Depend, TransFlag, Version};
+use alpm::{Alpm, Depend, Version};
 use alpm_utils::{AsTarg, DbListExt};
 use log::Level::Trace;
 use log::{debug, error, log_enabled, trace};
@@ -229,17 +229,8 @@ where
     /// Resolve a list of targets.
     pub fn resolve_targets<S: AsTarg>(mut self, pkgs: &[S]) -> Result<Actions<'a>, Error> {
         let mut aur_targets = Vec::new();
-        let localdb = self.alpm.localdb();
-        let trans = if self.flags.contains(Flags::NO_DEP_VERSION) {
-            Some(
-                self.alpm
-                    .trans(TransFlag::NO_LOCK | TransFlag::NO_DEP_VERSION),
-            )
-        } else {
-            None
-        };
-
         let mut repo_targets = Vec::new();
+        let localdb = self.alpm.localdb();
 
         for pkg in pkgs {
             let pkg = pkg.as_targ();
@@ -333,7 +324,6 @@ where
 
         self.calculate_dups();
 
-        drop(trans);
         Ok(self.actions)
     }
 
@@ -421,7 +411,7 @@ where
                     continue;
                 }
 
-                if let Some(pkg) = self.alpm.syncdbs().find_satisfier(dep.to_string()) {
+                if let Some(pkg) = self.find_repo_satisfier(dep.to_string()) {
                     self.stack.push(pkg.name().to_string());
                     self.resolve_repo_pkg(pkg, false)?;
                     self.stack.pop().unwrap();
@@ -465,7 +455,7 @@ where
                     continue;
                 }
 
-                if let Some(pkg) = self.alpm.syncdbs().find_satisfier(dep.to_string()) {
+                if let Some(pkg) = self.find_repo_satisfier(dep.to_string()) {
                     self.resolve_repo_pkg(pkg, false)?;
                 } else {
                     let mut stack = self.stack.clone();
@@ -547,11 +537,7 @@ where
             // for example, trying to resolve "pacman" with AUR_ONLY should pull in
             // "pacman-git". But because pacman is installed locally, this optimization
             // causes us to not cache "pacman-git" and end up with missing.
-            if self
-                .alpm
-                .localdb()
-                .pkg(pkg).is_ok()
-            {
+            if self.alpm.localdb().pkg(pkg).is_ok() {
                 continue;
             }
 
@@ -589,7 +575,6 @@ where
             return Ok(());
         }
 
-        let repo_pkgs = self.alpm.syncdbs();
         let localdb = self.alpm.localdb();
 
         let mut new_pkgs = Vec::new();
@@ -606,7 +591,7 @@ where
                 .chain(&pkg.make_depends)
                 .chain(check.into_iter().flatten())
                 .filter(|dep| localdb.pkg(*dep).is_err())
-                .filter(|dep| repo_pkgs.find_satisfier(*dep).is_none())
+                .filter(|dep| self.find_repo_satisfier(*dep).is_none())
                 .filter(|dep| self.find_satisfier_aur_cache(&Depend::new(*dep)).is_none());
 
             new_pkgs.extend(depends.cloned());
@@ -640,12 +625,33 @@ where
     }
 
     fn satisfied_local(&self, target: &Depend) -> Result<bool, Error> {
-        Ok(self
-            .alpm
-            .localdb()
-            .pkgs()?
-            .find_satisfier(target.to_string())
-            .is_some())
+        if let Ok(pkg) = self.alpm.localdb().pkg(target.name()) {
+            if satisfies_repo_pkg(target, &pkg, self.flags.contains(Flags::NO_DEP_VERSION)) {
+                return Ok(true);
+            }
+        }
+
+        if self.flags.contains(Flags::NO_DEP_VERSION) {
+            let ret = self.alpm.localdb().pkgs()?.find_satisfier(target.name());
+            Ok(ret.is_some())
+        } else {
+            let ret = self
+                .alpm
+                .localdb()
+                .pkgs()?
+                .find_satisfier(target.to_string());
+            Ok(ret.is_some())
+        }
+    }
+
+    fn find_repo_satisfier<S: AsRef<str>>(&self, target: S) -> Option<alpm::Package<'a>> {
+        let mut target = target.as_ref();
+
+        if self.flags.contains(Flags::NO_DEP_VERSION) {
+            target = target.splitn(2, is_ver_char).next().unwrap();
+        }
+
+        self.alpm.syncdbs().find_satisfier(target)
     }
 
     fn push_build(&mut self, pkgbase: String, pkg: AurPackage) {
@@ -4067,6 +4073,10 @@ mod tests {
             .make_depend("meson")
             .conflict("pacman");
 
+        raur.pkg("repo_version_test").depend("pacman-contrib>100");
+        raur.pkg("satisfied_versioned_repo_dep")
+            .depend("pacman>100");
+
         raur.pkg("version_equal").version("1-1");
         raur.pkg("version_newer").version("100-1");
         raur.pkg("version_older").version("0-1");
@@ -4442,6 +4452,31 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(pkgs, vec!["pacaur", "version_newer", "version_older"]);
+    }
+
+    #[test]
+    fn test_repo_nover() {
+        let TestActions { install, .. } = resolve(&["repo_version_test"], Flags::new());
+        assert_eq!(install, Vec::<String>::new());
+
+        let TestActions { install, .. } =
+            resolve(&["repo_version_test"], Flags::new() | Flags::NO_DEP_VERSION);
+        assert_eq!(install, vec!["pacman-contrib"]);
+    }
+
+    #[test]
+    fn test_satisfied_versioned_repo_dep() {
+        let TestActions { missing, .. } = resolve(&["satisfied_versioned_repo_dep"], Flags::new());
+        assert_eq!(
+            missing,
+            vec![vec!["satisfied_versioned_repo_dep", "pacman>100"]]
+        );
+
+        let TestActions { missing, .. } = resolve(
+            &["satisfied_versioned_repo_dep"],
+            Flags::new() | Flags::NO_DEP_VERSION,
+        );
+        assert_eq!(missing, Vec::<Vec<String>>::new());
     }
 
     #[test]
