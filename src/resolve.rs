@@ -286,7 +286,7 @@ where
 
         for aur_pkg in aur_targets {
             let dep = Depend::new(aur_pkg);
-            let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep)? {
+            let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, true)? {
                 pkg.clone()
             } else {
                 let mut stack = self.stack.clone();
@@ -349,9 +349,13 @@ where
             .find(|pkg| satisfies_aur_pkg(dep, pkg, self.flags.contains(Flags::NO_DEP_VERSION)))
     }
 
+    /// Expected behaviour
+    /// pull in a list of all matches, if one is installed, default to it.
+    /// unless we are looking for a target, then always show all options.
     fn select_satisfier_aur_cache(
         &self,
         dep: &Depend,
+        target: bool,
     ) -> Result<Option<&raur_ext::Package>, Error> {
         if let Some(f) = &self.provider_callback {
             let mut pkgs = self
@@ -371,9 +375,11 @@ where
                 return Ok(None);
             }
 
-            for &pkg in &pkgs {
-                if self.alpm.localdb().pkg(pkg).is_ok() {
-                    return Ok(self.cache.get(pkg));
+            if !target {
+                for &pkg in &pkgs {
+                    if self.alpm.localdb().pkg(pkg).is_ok() {
+                        return Ok(self.cache.get(pkg));
+                    }
                 }
             }
 
@@ -422,7 +428,7 @@ where
                     continue;
                 }
 
-                let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep)? {
+                let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false)? {
                     pkg.clone()
                 } else {
                     let mut stack = self.stack.clone();
