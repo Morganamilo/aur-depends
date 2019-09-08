@@ -267,11 +267,15 @@ where
         self.cache_aur_pkgs_recursive(&aur_targets, true)?;
 
         for (pkg, alpm_pkg) in repo_targets {
-            let up_to_date = self.flags.contains(Flags::NEEDED)
-                && localdb
-                    .pkgs()?
-                    .filter(|local| local.name() == alpm_pkg.name())
-                    .any(|local| alpm_pkg.version() <= local.version());
+            let mut up_to_date = false;
+
+            if self.flags.contains(Flags::NEEDED) {
+                if let Ok(local) = localdb.pkg(alpm_pkg.name()) {
+                    if local.version() >= alpm_pkg.version() {
+                        up_to_date = true
+                    }
+                }
+            }
 
             if up_to_date {
                 self.actions.unneeded.push(pkg.to_string());
@@ -291,11 +295,15 @@ where
                 continue;
             };
 
-            let up_to_date = self.flags.contains(Flags::NEEDED)
-                && localdb
-                    .pkgs()?
-                    .filter(|local| local.name() == pkg.name)
-                    .any(|local| Version::new(&pkg.version) <= local.version());
+            let mut up_to_date = false;
+
+            if self.flags.contains(Flags::NEEDED) {
+                if let Ok(local) = localdb.pkg(&pkg.name) {
+                    if local.version() >= Version::new(&pkg.version) {
+                        up_to_date = true
+                    }
+                }
+            }
 
             if up_to_date {
                 self.actions.unneeded.push(aur_pkg.to_string());
@@ -364,7 +372,7 @@ where
             }
 
             for &pkg in &pkgs {
-                if self.alpm.localdb().pkgs()?.any(|p| pkg == p.name()) {
+                if self.alpm.localdb().pkg(pkg).is_ok() {
                     return Ok(self.cache.get(pkg));
                 }
             }
@@ -536,8 +544,7 @@ where
             if self
                 .alpm
                 .localdb()
-                .pkgs()?
-                .any(|p| dbg!(pkg) == dbg!(p.name()))
+                .pkg(pkg).is_ok()
             {
                 continue;
             }
@@ -577,7 +584,7 @@ where
         }
 
         let repo_pkgs = self.alpm.syncdbs();
-        let local_pkgs = self.alpm.localdb().pkgs()?;
+        let localdb = self.alpm.localdb();
 
         let mut new_pkgs = Vec::new();
         for pkg in pkgs {
@@ -592,7 +599,7 @@ where
                 .iter()
                 .chain(&pkg.make_depends)
                 .chain(check.into_iter().flatten())
-                .filter(|dep| local_pkgs.find_satisfier(*dep).is_none())
+                .filter(|dep| localdb.pkg(*dep).is_err())
                 .filter(|dep| repo_pkgs.find_satisfier(*dep).is_none())
                 .filter(|dep| self.find_satisfier_aur_cache(&Depend::new(*dep)).is_none());
 
@@ -4435,8 +4442,8 @@ mod tests {
     #[ignore]
     fn test_resolve_targets() {
         //init_logger();
-        //let raur = raur();
-        let raur = raur::Handle::default();
+        let raur = raur();
+        //let raur = raur::Handle::default();
         let alpm = alpm();
         let mut cache = HashSet::new();
         let flags = Flags::new() & !Flags::TARGET_PROVIDES & !Flags::MISSING_PROVIDES;
