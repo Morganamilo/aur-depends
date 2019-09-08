@@ -1,6 +1,7 @@
-use crate::actions::{Actions, AurPackage, AurUpdate, Base, Conflict, RepoPackage, AurUpdates};
+use crate::actions::{Actions, AurPackage, AurUpdate, AurUpdates, Base, Conflict, RepoPackage};
 use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
-use crate::{Error, Flags};
+use crate::Error;
+use bitflags::bitflags;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -13,6 +14,38 @@ use raur::{Raur, SearchBy};
 use raur_ext::{Cache, RaurExt};
 
 type ConflictMap = HashMap<String, Conflict>;
+
+bitflags! {
+    /// Config options for Handle.
+    pub struct Flags: u16 {
+        /// Do not resolve dependencies.
+        const NO_DEPS = 1 << 2;
+        /// Do not enforse version constraints on dependencies.
+        const NO_DEP_VERSION = 1 << 3;
+        /// Solve provides for targets.
+        const TARGET_PROVIDES = 1 << 4;
+        /// Solve provides for missing packages.
+        const MISSING_PROVIDES = 1 << 5;
+        /// Solve provides in all other instances.
+        const PROVIDES = 1 << 6;
+        /// Calculate which packages are only needed to build the packages.
+        const CALCULATE_MAKE = 1 << 7;
+        /// Calculate conflicts
+        const CALCULATE_CONFLICTS = 1 << 8;
+        /// Calculate conflicts.
+        const CHECK_DEPENDS = 1 << 9;
+        /// Ignore targets that are up to date.
+        const NEEDED = 1 << 10;
+        /// Only search the AUR for targets.
+        const AUR_ONLY = 1 << 11;
+        /// Only search the repos for targets.
+        const REPO_ONLY = 1 << 12;
+        /// Allow the use of `aur/foo` as meaning from the AUR, instead of a repo named `aur`.
+        const AUR_NAMESPACE = 1 << 13;
+        /// when fetching updates, also include packages that are older than locally installed.
+        const ENABLE_DOWNGRADE = 1 << 14;
+    }
+}
 
 impl Flags {
     /// Create a new Flags with the default configuration
@@ -186,7 +219,10 @@ where
             })
             .collect::<Vec<_>>();
 
-        let updates = AurUpdates { updates: to_upgrade, missing };
+        let updates = AurUpdates {
+            updates: to_upgrade,
+            missing,
+        };
         Ok(updates)
     }
 
@@ -365,8 +401,8 @@ where
                 let dep = Depend::new(dep_str);
 
                 if self.satisfied_aur(&dep)
-                    || self.satisfied_repo(&dep)
                     || self.satisfied_local(&dep)?
+                    || self.satisfied_repo(&dep)
                 {
                     continue;
                 }
@@ -556,8 +592,8 @@ where
                 .iter()
                 .chain(&pkg.make_depends)
                 .chain(check.into_iter().flatten())
-                .filter(|dep| repo_pkgs.find_satisfier(*dep).is_none())
                 .filter(|dep| local_pkgs.find_satisfier(*dep).is_none())
+                .filter(|dep| repo_pkgs.find_satisfier(*dep).is_none())
                 .filter(|dep| self.find_satisfier_aur_cache(&Depend::new(*dep)).is_none());
 
             new_pkgs.extend(depends.cloned());
@@ -4030,7 +4066,9 @@ mod tests {
     fn init_logger() {
         let _ = TermLogger::init(
             LevelFilter::Trace,
-            ConfigBuilder::new().add_filter_allow_str("aur_depends").build(),
+            ConfigBuilder::new()
+                .add_filter_allow_str("aur_depends")
+                .build(),
             TerminalMode::Stderr,
         );
     }

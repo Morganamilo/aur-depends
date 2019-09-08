@@ -8,7 +8,6 @@
 
 mod actions;
 mod error;
-mod flags;
 mod resolve;
 mod satisfies;
 
@@ -17,5 +16,4 @@ mod tests;
 
 pub use crate::actions::*;
 pub use crate::error::*;
-pub use crate::flags::*;
 pub use crate::resolve::*;
