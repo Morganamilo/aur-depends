@@ -428,6 +428,13 @@ where
                 let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false)? {
                     pkg.clone()
                 } else {
+                    debug!("failed to find '{}' in aur cache", dep.to_string(),);
+                    if log_enabled!(Trace) {
+                        trace!(
+                            "at time of failure plgcache is: {:?}\n",
+                            self.cache.iter().map(|p| &p.name).collect::<Vec<_>>()
+                        );
+                    }
                     self.actions.missing.push(Missing {
                         dep: dep.to_string(),
                         stack: self.stack.clone(),
@@ -565,6 +572,8 @@ where
                 );
             }
         }
+
+        debug!("trying to cache {:?}\n", to_info);
 
         let ret = self.raur.cache_info(self.cache, &to_info)?;
         Ok(ret)
