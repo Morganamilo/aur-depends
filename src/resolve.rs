@@ -4151,7 +4151,11 @@ mod tests {
         TestActions {
             install,
             build,
-            missing: actions.missing,
+            missing: actions
+                .missing
+                .into_iter()
+                .map(|m| m.stack.into_iter().chain(Some(m.dep)).collect())
+                .collect(),
             make,
             duplicates: actions.duplicates,
         }
