@@ -2,7 +2,7 @@ use alpm::{DepMod, Depend};
 
 /// The response from resolving dependencies.
 ///
-/// Note that just because resolving retuend Ok() does not mean it is safe to bindly start
+/// Note that just because resolving returned Ok() does not mean it is safe to bindly start
 /// installing these packages.
 #[derive(Debug, Default)]
 pub struct Actions<'a> {
