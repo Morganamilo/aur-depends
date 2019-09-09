@@ -184,7 +184,7 @@ where
     /// # Ok (())
     /// # }
     /// ```
-    pub fn aur_updates(&mut self) -> Result<AurUpdates, Error> {
+    pub fn aur_updates(&mut self) -> Result<AurUpdates<'a>, Error> {
         let local_pkgs = self
             .alpm
             .localdb()
