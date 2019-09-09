@@ -118,6 +118,7 @@ impl ProviderCallback {
 #[derive(Debug)]
 pub struct Resolver<'a, H: Raur = raur::Handle> {
     alpm: &'a Alpm,
+    resolved: HashSet<String>,
     cache: &'a mut Cache,
     stack: Vec<String>,
     raur: &'a H,
@@ -135,6 +136,7 @@ where
     pub fn new(alpm: &'a Alpm, cache: &'a mut Cache, raur: &'a H, flags: Flags) -> Self {
         Resolver {
             alpm,
+            resolved: HashSet::new(),
             cache,
             stack: Vec::new(),
             actions: Actions::default(),
@@ -528,8 +530,8 @@ where
             }
 
             if log_enabled!(Trace) {
-                trace!(
-                    "resolved {:?} found {:?}",
+                debug!(
+                    "provides resolved {:?} found {:?}\n",
                     pkgs.iter().map(AsRef::as_ref).collect::<Vec<_>>(),
                     info.iter().map(|p| p.name.clone()).collect::<Vec<_>>()
                 );
@@ -610,9 +612,17 @@ where
                 .chain(check.into_iter().flatten())
                 .filter(|dep| localdb.pkg(*dep).is_err())
                 .filter(|dep| self.find_repo_satisfier(*dep).is_none())
-                .filter(|dep| self.find_satisfier_aur_cache(&Depend::new(*dep)).is_none());
+                .filter(|dep| {
+                    let dep = Depend::new(*dep);
+                    self.find_satisfier_aur_cache(&dep).is_none()
+                        && !self.resolved.contains(dep.name())
+                })
+                .collect::<Vec<_>>();
 
-            new_pkgs.extend(depends.cloned());
+            for pkg in depends {
+                self.resolved.insert(Depend::new(pkg).name().to_string());
+                new_pkgs.push(pkg.clone());
+            }
         }
 
         self.cache_aur_pkgs_recursive(&new_pkgs, false)
@@ -769,8 +779,11 @@ where
 {
     fn has_pkg<S: AsRef<str>>(&self, name: S) -> bool {
         let name = name.as_ref();
-        self.actions.iter_build_pkgs().any(|pkg| pkg.pkg.name == name)
-            || self.actions.install.iter().any(|pkg| pkg.pkg.name() == name)
+        let install = &self.actions.install;
+        self.actions
+            .iter_build_pkgs()
+            .any(|pkg| pkg.pkg.name == name)
+            || install.iter().any(|pkg| pkg.pkg.name() == name)
     }
 
     // check a conflict from locally installed pkgs, against install+build
@@ -782,7 +795,9 @@ where
     ) {
         let name = name.as_ref();
 
-        self.actions.install.iter()
+        self.actions
+            .install
+            .iter()
             .map(|pkg| &pkg.pkg)
             .filter(|pkg| pkg.name() != name)
             .filter(|pkg| satisfies_repo_pkg(conflict, pkg, false))
