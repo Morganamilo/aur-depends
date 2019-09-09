@@ -32,6 +32,13 @@ pub struct Actions<'a> {
     pub inner_conflicts: Vec<Conflict>,
 }
 
+impl<'a> Actions<'a> {
+    /// An iterator over each individual package in self.build.
+    pub fn iter_build_pkgs(&self) -> impl Iterator<Item = &AurPackage> {
+        self.build.iter().flat_map(|b| &b.pkgs)
+    }
+}
+
 /// Wrapper around a package for extra metadata.
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Package<T> {

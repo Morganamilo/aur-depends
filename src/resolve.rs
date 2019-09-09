@@ -107,7 +107,7 @@ impl ProviderCallback {
 ///     println!("install: {}", install.pkg.name())
 /// }
 ///
-/// for build in actions.build.iter().flat_map(|b| &b.pkgs) {
+/// for build in actions.iter_build_pkgs() {
 ///     println!("build: {}", build.pkg.name)
 /// }
 ///
@@ -751,14 +751,6 @@ where
             }
         }
     }
-
-    fn install_iter(&self) -> impl Iterator<Item = &RepoPackage> {
-        self.actions.install.iter()
-    }
-
-    fn build_iter(&self) -> impl Iterator<Item = &AurPackage> {
-        self.actions.build.iter().flat_map(|b| &b.pkgs)
-    }
 }
 
 impl<'a, H> Resolver<'a, H>
@@ -767,8 +759,8 @@ where
 {
     fn has_pkg<S: AsRef<str>>(&self, name: S) -> bool {
         let name = name.as_ref();
-        self.build_iter().any(|pkg| pkg.pkg.name == name)
-            || self.install_iter().any(|pkg| pkg.pkg.name() == name)
+        self.actions.iter_build_pkgs().any(|pkg| pkg.pkg.name == name)
+            || self.actions.install.iter().any(|pkg| pkg.pkg.name() == name)
     }
 
     // check a conflict from locally installed pkgs, against install+build
@@ -780,7 +772,7 @@ where
     ) {
         let name = name.as_ref();
 
-        self.install_iter()
+        self.actions.install.iter()
             .map(|pkg| &pkg.pkg)
             .filter(|pkg| pkg.name() != name)
             .filter(|pkg| satisfies_repo_pkg(conflict, pkg, false))
@@ -791,7 +783,8 @@ where
                     .push(pkg.name().to_string(), conflict);
             });
 
-        self.build_iter()
+        self.actions
+            .iter_build_pkgs()
             .map(|pkg| &pkg.pkg)
             .filter(|pkg| pkg.name != name)
             .filter(|pkg| satisfies_aur_pkg(conflict, pkg, false))
@@ -828,13 +821,13 @@ where
     }
 
     fn check_forward_conflicts(&self, conflicts: &mut ConflictMap) -> Result<(), Error> {
-        for pkg in self.install_iter() {
+        for pkg in self.actions.install.iter() {
             for conflict in pkg.pkg.conflicts() {
                 self.check_forward_conflict(pkg.pkg.name(), &conflict, conflicts)?;
             }
         }
 
-        for pkg in self.build_iter() {
+        for pkg in self.actions.iter_build_pkgs() {
             for conflict in &pkg.pkg.conflicts {
                 self.check_forward_conflict(&pkg.pkg.name, &Depend::new(conflict), conflicts)?;
             }
@@ -844,13 +837,13 @@ where
     }
 
     fn check_inner_conflicts(&self, conflicts: &mut ConflictMap) {
-        for pkg in self.install_iter() {
+        for pkg in self.actions.install.iter() {
             for conflict in pkg.pkg.conflicts() {
                 self.check_reverse_conflict(pkg.pkg.name(), &conflict, conflicts)
             }
         }
 
-        for pkg in self.build_iter() {
+        for pkg in self.actions.iter_build_pkgs() {
             for conflict in pkg.pkg.conflicts.iter() {
                 self.check_reverse_conflict(&pkg.pkg.name, &Depend::new(conflict), conflicts)
             }
