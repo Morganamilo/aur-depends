@@ -57,6 +57,7 @@ impl Flags {
             | Flags::MISSING_PROVIDES
             | Flags::AUR_NAMESPACE
             | Flags::CALCULATE_CONFLICTS
+            | Flags::CHECK_DEPENDS
     }
 }
 
