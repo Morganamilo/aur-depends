@@ -595,8 +595,6 @@ where
             return Ok(());
         }
 
-        let localdb = self.alpm.localdb();
-
         let mut new_pkgs = Vec::new();
         for pkg in pkgs {
             let check = if self.flags.contains(Flags::CHECK_DEPENDS) {
@@ -609,18 +607,20 @@ where
                 .depends
                 .iter()
                 .chain(&pkg.make_depends)
-                .chain(check.into_iter().flatten())
-                .filter(|dep| localdb.pkg(*dep).is_err())
-                .filter(|dep| self.find_repo_satisfier(*dep).is_none())
-                .filter(|dep| {
-                    let dep = Depend::new(*dep);
-                    self.find_satisfier_aur_cache(&dep).is_none()
-                        && !self.resolved.contains(dep.name())
-                })
-                .collect::<Vec<_>>();
+                .chain(check.into_iter().flatten());
 
             for pkg in depends {
-                self.resolved.insert(Depend::new(pkg).name().to_string());
+                let dep = Depend::new(pkg);
+
+                if self.satisfied_local(&dep).unwrap()
+                    || self.find_repo_satisfier(&pkg).is_some()
+                    || (self.find_satisfier_aur_cache(&dep).is_some()
+                        || self.resolved.contains(dep.name()))
+                {
+                    continue;
+                }
+
+                self.resolved.insert(dep.name().to_string());
                 new_pkgs.push(pkg.clone());
             }
         }
