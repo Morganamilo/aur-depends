@@ -577,7 +577,18 @@ where
 
         debug!("trying to cache {:?}\n", to_info);
 
-        let ret = self.raur.cache_info(self.cache, &to_info)?;
+        let mut ret = self.raur.cache_info(self.cache, &to_info)?;
+
+        ret.retain(|pkg| {
+            pkgs.iter().any(|dep| {
+                satisfies_aur_pkg(
+                    &Depend::new(dep.as_ref()),
+                    pkg,
+                    self.flags.contains(Flags::NO_DEP_VERSION),
+                )
+            })
+        });
+
         Ok(ret)
     }
 
