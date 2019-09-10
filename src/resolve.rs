@@ -413,9 +413,9 @@ where
             for dep_str in depends {
                 let dep = Depend::new(dep_str);
 
-                if self.satisfied_aur(&dep)
+                if self.satisfied_build(&dep)
                     || self.satisfied_local(&dep)?
-                    || self.satisfied_repo(&dep)
+                    || self.satisfied_install(&dep)
                 {
                     continue;
                 }
@@ -468,7 +468,7 @@ where
 
         if !self.flags.contains(Flags::NO_DEPS) {
             for dep in pkg.depends() {
-                if self.satisfied_repo(&dep) || self.satisfied_local(&dep)? {
+                if self.satisfied_install(&dep) || self.satisfied_local(&dep)? {
                     continue;
                 }
 
@@ -628,7 +628,7 @@ where
         self.cache_aur_pkgs_recursive(&new_pkgs, false)
     }
 
-    fn satisfied_aur(&self, target: &Depend) -> bool {
+    fn satisfied_build(&self, target: &Depend) -> bool {
         self.actions
             .build
             .iter()
@@ -642,7 +642,7 @@ where
             })
     }
 
-    fn satisfied_repo(&self, target: &Depend) -> bool {
+    fn satisfied_install(&self, target: &Depend) -> bool {
         self.actions.install.iter().any(|install| {
             satisfies_repo_pkg(
                 target,
