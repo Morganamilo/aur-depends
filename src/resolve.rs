@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use alpm::{Alpm, Depend, Version};
-use alpm_utils::{AsTarg, DbListExt};
+use alpm_utils::{DbListExt, Target};
 use log::Level::Trace;
 use log::{debug, error, log_enabled, trace};
 use raur::{Raur, SearchBy};
@@ -191,7 +191,7 @@ where
             .alpm
             .localdb()
             .pkgs()?
-            .filter(|p| self.alpm.syncdbs().pkg(p.name()).is_none())
+            .filter(|p| self.alpm.syncdbs().find_satisfier(p.name()).is_none())
             .filter(|pkg| !pkg.should_ignore())
             .collect::<Vec<_>>();
 
@@ -232,14 +232,13 @@ where
     }
 
     /// Resolve a list of targets.
-    pub fn resolve_targets<S: AsTarg>(mut self, pkgs: &[S]) -> Result<Actions<'a>, Error> {
+    pub fn resolve_targets(mut self, pkgs: &[&str]) -> Result<Actions<'a>, Error> {
         let mut aur_targets = Vec::new();
         let mut repo_targets = Vec::new();
         let localdb = self.alpm.localdb();
 
         for pkg in pkgs {
-            let pkg = pkg.as_targ();
-
+            let pkg = Target::from(pkg);
             if pkg.repo == Some("aur") && self.flags.contains(Flags::AUR_NAMESPACE) {
                 aur_targets.push(pkg.pkg);
                 continue;
@@ -4123,7 +4122,7 @@ mod tests {
         raur
     }
 
-    fn init_logger() {
+    fn _init_logger() {
         let _ = TermLogger::init(
             LevelFilter::Trace,
             ConfigBuilder::new()
@@ -4521,7 +4520,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_resolve_targets() {
         //init_logger();
         let raur = raur();
