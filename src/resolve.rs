@@ -61,6 +61,12 @@ impl Flags {
     }
 }
 
+impl Default for Flags {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 struct ProviderCallback(Box<dyn Fn(&[&str]) -> usize>);
 
 impl fmt::Debug for ProviderCallback {
