@@ -694,16 +694,13 @@ where
 
     fn push_build(&mut self, pkgbase: String, pkg: AurPackage) {
         for base in &mut self.actions.build {
-            if base.pkgbase == pkgbase {
+            if base.package_base() == pkgbase {
                 base.pkgs.push(pkg);
                 return;
             }
         }
 
-        self.actions.build.push(Base {
-            pkgbase: pkgbase.clone(),
-            pkgs: vec![pkg],
-        });
+        self.actions.build.push(Base { pkgs: vec![pkg] });
     }
 
     fn calculate_dups(&mut self) {
