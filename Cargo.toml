@@ -17,7 +17,7 @@ alpm = "0.9.0"
 log = "0.4.11"
 raur = { version = "3.0.1", default-features = false }
 raur-ext = { version = "2.0.0", default-features = false }
-alpm-utils = "0.2.1"
+alpm-utils = { version = "0.2.1", path = "../alpm.rs/alpm-utils" }
 bitflags = "1.2.1"
 
 [dev-dependencies]

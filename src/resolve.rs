@@ -60,7 +60,7 @@ impl Default for Flags {
     }
 }
 
-struct ProviderCallback(Box<dyn Fn(&[&str]) -> usize>);
+struct ProviderCallback(Box<dyn Fn(&str, &[&str]) -> usize>);
 
 impl fmt::Debug for ProviderCallback {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
@@ -69,7 +69,7 @@ impl fmt::Debug for ProviderCallback {
 }
 
 impl ProviderCallback {
-    fn new<F: Fn(&[&str]) -> usize + 'static>(f: F) -> Self {
+    fn new<F: Fn(&str, &[&str]) -> usize + 'static>(f: F) -> Self {
         ProviderCallback(Box::new(f))
     }
 }
@@ -157,11 +157,13 @@ where
     /// Set the provider callback
     ///
     /// The provider callback will be called any time there is a choice of multiple AUR packages
-    /// that can satisfy a dependency. This callback receives a slice of package names then, returns
-    /// the index of which package to pick.
+    /// that can satisfy a dependency. This callback receives the dependency that we are trying to
+    /// satisfy and a slice of package names satisfying it.
+    ///
+    /// The callback returns returns the index of which package to pick.
     ///
     /// Retuning an invalid index will cause a panic.
-    pub fn provider_callback<F: Fn(&[&str]) -> usize + 'static>(mut self, f: F) -> Self {
+    pub fn provider_callback<F: Fn(&str, &[&str]) -> usize + 'static>(mut self, f: F) -> Self {
         self.provider_callback = Some(ProviderCallback::new(f));
         self
     }
@@ -396,7 +398,7 @@ where
 
             pkgs[1..].sort();
 
-            let choice = f.0(&pkgs);
+            let choice = f.0(dep.to_string().as_str(), &pkgs);
             debug!("choice was: {}={}", choice, pkgs[choice]);
             Ok(self.cache.get(pkgs[choice]))
         } else {
@@ -3999,7 +4001,7 @@ mod tests {
         let alpm = alpm();
         let mut cache = HashSet::new();
 
-        let handle = Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|pkgs| {
+        let handle = Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|_, pkgs| {
             debug!("provider choice: {:?}", pkgs);
             if let Some(i) = pkgs.iter().position(|pkg| *pkg == "yay-bin") {
                 i
@@ -4384,7 +4386,7 @@ mod tests {
         let mut cache = HashSet::new();
         let flags = Flags::new() & !Flags::TARGET_PROVIDES & !Flags::MISSING_PROVIDES;
 
-        let handle = Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|pkgs| {
+        let handle = Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|_, pkgs| {
             println!("provider choice: {:?}", pkgs);
             0
         });
