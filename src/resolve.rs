@@ -816,9 +816,9 @@ where
             .filter(|pkg| satisfies_repo_pkg(conflict, pkg, false))
             .for_each(|pkg| {
                 conflicts
-                    .entry(name.to_string())
-                    .or_insert_with(|| Conflict::new(name.to_string()))
-                    .push(pkg.name().to_string(), conflict);
+                    .entry(pkg.name().to_string())
+                    .or_insert_with(|| Conflict::new(pkg.name().to_string()))
+                    .push(name.to_string(), conflict);
             });
 
         self.actions
@@ -828,9 +828,9 @@ where
             .filter(|pkg| satisfies_aur_pkg(conflict, pkg, false))
             .for_each(|pkg| {
                 conflicts
-                    .entry(name.to_string())
-                    .or_insert_with(|| Conflict::new(name.to_string()))
-                    .push(pkg.name.to_string(), conflict);
+                    .entry(pkg.name.to_string())
+                    .or_insert_with(|| Conflict::new(pkg.name.to_string()))
+                    .push(name.to_string(), conflict);
             });
     }
 
