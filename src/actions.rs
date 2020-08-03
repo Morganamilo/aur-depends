@@ -1,17 +1,20 @@
+use crate::Error;
+
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
-use alpm::{DepMod, Depend};
+use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
+use alpm::{Alpm, DepMod, Depend};
+
+type ConflictMap = HashMap<String, Conflict>;
 
 /// The response from resolving dependencies.
 ///
 /// Note that just because resolving returned Ok() does not mean it is safe to bindly start
 /// installing these packages.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Actions<'a> {
-    /// There were duplicate packages in install/build. This means that two different packages with
-    /// the same name want to be installed. As this can not be done it should be treated as a hard
-    /// error.
-    pub duplicates: Vec<String>,
+    pub(crate) alpm: &'a Alpm,
     /// Some of the targets or dependencies could not be satisfied. This should be treated as
     /// a hard error.
     pub missing: Vec<Missing>,
@@ -21,17 +24,6 @@ pub struct Actions<'a> {
     pub build: Vec<Base>,
     /// Repo packages to install.
     pub install: Vec<RepoPackage<'a>>,
-    /// Conflicts. Do note that even with conflicts it can still be possible to continue and
-    /// install the packages. Although that is not checked here.
-    ///
-    /// For example installing pacman-git will conflict with pacman. But the install will still
-    /// succeed as long as the user hits yes to pacman's prompt to remove pacman.
-    ///
-    /// However other cases are more complex and can not be automatically resolved. So it is up to
-    /// the user to decide how to handle these.
-    pub conflicts: Vec<Conflict>,
-    /// Inner conflict. The same rules that apply to conflicts apply here.
-    pub inner_conflicts: Vec<Conflict>,
 }
 
 impl<'a> Actions<'a> {
@@ -151,4 +143,180 @@ pub struct Missing {
     pub dep: String,
     /// The dependency path leadsing to pkg.
     pub stack: Vec<String>,
+}
+
+impl<'a> Actions<'a> {
+    fn has_pkg<S: AsRef<str>>(&self, name: S) -> bool {
+        let name = name.as_ref();
+        let install = &self.install;
+        self.iter_build_pkgs().any(|pkg| pkg.pkg.name == name)
+            || install.iter().any(|pkg| pkg.pkg.name() == name)
+    }
+
+    // check a conflict from locally installed pkgs, against install+build
+    fn check_reverse_conflict<S: AsRef<str>>(
+        &self,
+        name: S,
+        conflict: &Depend,
+        conflicts: &mut ConflictMap,
+    ) {
+        let name = name.as_ref();
+
+        self.install
+            .iter()
+            .map(|pkg| &pkg.pkg)
+            .filter(|pkg| pkg.name() != name)
+            .filter(|pkg| satisfies_repo_pkg(conflict, pkg, false))
+            .for_each(|pkg| {
+                conflicts
+                    .entry(pkg.name().to_string())
+                    .or_insert_with(|| Conflict::new(pkg.name().to_string()))
+                    .push(name.to_string(), conflict);
+            });
+
+        self.iter_build_pkgs()
+            .map(|pkg| &pkg.pkg)
+            .filter(|pkg| pkg.name != name)
+            .filter(|pkg| satisfies_aur_pkg(conflict, pkg, false))
+            .for_each(|pkg| {
+                conflicts
+                    .entry(pkg.name.to_string())
+                    .or_insert_with(|| Conflict::new(pkg.name.to_string()))
+                    .push(name.to_string(), conflict);
+            });
+    }
+
+    // check a conflict from install+build against all locally installed pkgs
+    fn check_forward_conflict<S: AsRef<str>>(
+        &self,
+        name: S,
+        conflict: &Depend,
+        conflicts: &mut ConflictMap,
+    ) -> Result<(), Error> {
+        let name = name.as_ref();
+        self.alpm
+            .localdb()
+            .pkgs()?
+            .filter(|pkg| !self.has_pkg(pkg.name()))
+            .filter(|pkg| pkg.name() != name)
+            .filter(|pkg| satisfies_repo_pkg(conflict, pkg, false))
+            .for_each(|pkg| {
+                conflicts
+                    .entry(name.to_string())
+                    .or_insert_with(|| Conflict::new(name.to_string()))
+                    .push(pkg.name().to_string(), conflict);
+            });
+
+        Ok(())
+    }
+
+    fn check_forward_conflicts(&self, conflicts: &mut ConflictMap) -> Result<(), Error> {
+        for pkg in self.install.iter() {
+            for conflict in pkg.pkg.conflicts() {
+                self.check_forward_conflict(pkg.pkg.name(), &conflict, conflicts)?;
+            }
+        }
+
+        for pkg in self.iter_build_pkgs() {
+            for conflict in &pkg.pkg.conflicts {
+                self.check_forward_conflict(&pkg.pkg.name, &Depend::new(conflict), conflicts)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn check_inner_conflicts(&self, conflicts: &mut ConflictMap) {
+        for pkg in self.install.iter() {
+            for conflict in pkg.pkg.conflicts() {
+                self.check_reverse_conflict(pkg.pkg.name(), &conflict, conflicts)
+            }
+        }
+
+        for pkg in self.iter_build_pkgs() {
+            for conflict in pkg.pkg.conflicts.iter() {
+                self.check_reverse_conflict(&pkg.pkg.name, &Depend::new(conflict), conflicts)
+            }
+        }
+    }
+
+    fn check_reverse_conflicts(&self, conflicts: &mut ConflictMap) -> Result<(), Error> {
+        self.alpm
+            .localdb()
+            .pkgs()?
+            .filter(|pkg| !self.has_pkg(pkg.name()))
+            .for_each(|pkg| {
+                pkg.conflicts().for_each(|conflict| {
+                    self.check_reverse_conflict(pkg.name(), &conflict, conflicts)
+                })
+            });
+
+        Ok(())
+    }
+
+    /// Calculate conflicts. Do note that even with conflicts it can still be possible to continue and
+    /// install the packages. Although that is not checked here.
+    ///
+    /// For example installing pacman-git will conflict with pacman. But the install will still
+    /// succeed as long as the user hits yes to pacman's prompt to remove pacman.
+    ///
+    /// However other cases are more complex and can not be automatically resolved. So it is up to
+    /// the user to decide how to handle these.
+    pub fn calculate_conflicts(&self) -> Result<Vec<Conflict>, Error> {
+        let mut conflicts = ConflictMap::new();
+
+        self.check_reverse_conflicts(&mut conflicts)?;
+        self.check_forward_conflicts(&mut conflicts)?;
+
+        let mut conflicts = conflicts
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect::<Vec<Conflict>>();
+
+        conflicts.sort();
+
+        Ok(conflicts)
+    }
+
+    /// Calculate inner conflicts. Do note that even with conflicts it can still be possible to continue and
+    /// install the packages. Although that is not checked here.
+    ///
+    /// For example installing pacman-git will conflict with pacman. But the install will still
+    /// succeed as long as the user hits yes to pacman's prompt to remove pacman.
+    ///
+    /// However other cases are more complex and can not be automatically resolved. So it is up to
+    /// the user to decide how to handle these.
+    pub fn calculate_inner_conflicts(&self) -> Result<Vec<Conflict>, Error> {
+        let mut inner_conflicts = ConflictMap::new();
+
+        self.check_inner_conflicts(&mut inner_conflicts);
+
+        let mut inner_conflicts = inner_conflicts
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect::<Vec<Conflict>>();
+
+        inner_conflicts.sort();
+
+        Ok(inner_conflicts)
+    }
+
+    /// Find duplicate targets. It is possible to have duplicate targets if packages with the same
+    /// name exist across repos.
+    pub fn duplicate_targets(&self) -> Vec<String> {
+        let mut names = HashSet::new();
+
+        let build = self.iter_build_pkgs().map(|pkg| pkg.pkg.name.as_str());
+
+        let duplicates = self
+            .install
+            .iter()
+            .map(|pkg| pkg.pkg.name())
+            .chain(build)
+            .filter(|&name| !names.insert(name))
+            .map(Into::into)
+            .collect::<Vec<_>>();
+
+        duplicates
+    }
 }

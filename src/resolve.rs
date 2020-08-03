@@ -1,11 +1,9 @@
-use crate::actions::{
-    Actions, AurPackage, AurUpdate, AurUpdates, Base, Conflict, Missing, RepoPackage,
-};
+use crate::actions::{Actions, AurPackage, AurUpdate, AurUpdates, Base, Missing, RepoPackage};
 use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
 use crate::Error;
 use bitflags::bitflags;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 
 use alpm::{Alpm, Depend, Version};
@@ -14,8 +12,6 @@ use log::Level::Trace;
 use log::{debug, error, log_enabled, trace};
 use raur::{Raur, SearchBy};
 use raur_ext::{Cache, RaurExt};
-
-type ConflictMap = HashMap<String, Conflict>;
 
 bitflags! {
     /// Config options for Handle.
@@ -33,8 +29,6 @@ bitflags! {
         /// Calculate which packages are only needed to build the packages.
         const CALCULATE_MAKE = 1 << 7;
         /// Calculate conflicts
-        const CALCULATE_CONFLICTS = 1 << 8;
-        /// Calculate conflicts.
         const CHECK_DEPENDS = 1 << 9;
         /// Ignore targets that are up to date.
         const NEEDED = 1 << 10;
@@ -56,7 +50,6 @@ impl Flags {
             | Flags::TARGET_PROVIDES
             | Flags::MISSING_PROVIDES
             | Flags::AUR_NAMESPACE
-            | Flags::CALCULATE_CONFLICTS
             | Flags::CHECK_DEPENDS
     }
 }
@@ -140,12 +133,20 @@ where
 {
     /// Create a new Resolver
     pub fn new(alpm: &'a Alpm, cache: &'a mut Cache, raur: &'a H, flags: Flags) -> Self {
+        let actions = Actions {
+            alpm,
+            missing: Vec::new(),
+            unneeded: Vec::new(),
+            build: Vec::new(),
+            install: Vec::new(),
+        };
+
         Resolver {
             alpm,
             resolved: HashSet::new(),
             cache,
             stack: Vec::new(),
-            actions: Actions::default(),
+            actions,
             raur,
             flags,
             seen: HashSet::new(),
@@ -339,12 +340,6 @@ where
         if self.flags.contains(Flags::CALCULATE_MAKE) {
             self.calculate_make();
         }
-
-        if self.flags.contains(Flags::CALCULATE_CONFLICTS) {
-            self.calculate_conflicts()?;
-        }
-
-        self.calculate_dups();
 
         Ok(self.actions)
     }
@@ -717,27 +712,6 @@ where
         self.actions.build.push(Base { pkgs: vec![pkg] });
     }
 
-    fn calculate_dups(&mut self) {
-        let mut names = HashSet::new();
-
-        let build = self
-            .actions
-            .build
-            .iter()
-            .flat_map(|b| &b.pkgs)
-            .map(|pkg| pkg.pkg.name.as_str());
-
-        self.actions.duplicates = self
-            .actions
-            .install
-            .iter()
-            .map(|pkg| pkg.pkg.name())
-            .chain(build)
-            .filter(|&name| !names.insert(name))
-            .map(Into::into)
-            .collect::<Vec<_>>();
-    }
-
     fn calculate_make(&mut self) {
         let mut runtime = HashSet::new();
         let mut run = true;
@@ -794,140 +768,6 @@ where
     }
 }
 
-impl<'a, H> Resolver<'a, H>
-where
-    H: Raur<Err = raur::Error>,
-{
-    fn has_pkg<S: AsRef<str>>(&self, name: S) -> bool {
-        let name = name.as_ref();
-        let install = &self.actions.install;
-        self.actions
-            .iter_build_pkgs()
-            .any(|pkg| pkg.pkg.name == name)
-            || install.iter().any(|pkg| pkg.pkg.name() == name)
-    }
-
-    // check a conflict from locally installed pkgs, against install+build
-    fn check_reverse_conflict<S: AsRef<str>>(
-        &self,
-        name: S,
-        conflict: &Depend,
-        conflicts: &mut ConflictMap,
-    ) {
-        let name = name.as_ref();
-
-        self.actions
-            .install
-            .iter()
-            .map(|pkg| &pkg.pkg)
-            .filter(|pkg| pkg.name() != name)
-            .filter(|pkg| satisfies_repo_pkg(conflict, pkg, false))
-            .for_each(|pkg| {
-                conflicts
-                    .entry(pkg.name().to_string())
-                    .or_insert_with(|| Conflict::new(pkg.name().to_string()))
-                    .push(name.to_string(), conflict);
-            });
-
-        self.actions
-            .iter_build_pkgs()
-            .map(|pkg| &pkg.pkg)
-            .filter(|pkg| pkg.name != name)
-            .filter(|pkg| satisfies_aur_pkg(conflict, pkg, false))
-            .for_each(|pkg| {
-                conflicts
-                    .entry(pkg.name.to_string())
-                    .or_insert_with(|| Conflict::new(pkg.name.to_string()))
-                    .push(name.to_string(), conflict);
-            });
-    }
-
-    // check a conflict from install+build against all locally installed pkgs
-    fn check_forward_conflict<S: AsRef<str>>(
-        &self,
-        name: S,
-        conflict: &Depend,
-        conflicts: &mut ConflictMap,
-    ) -> Result<(), Error> {
-        let name = name.as_ref();
-        self.alpm
-            .localdb()
-            .pkgs()?
-            .filter(|pkg| !self.has_pkg(pkg.name()))
-            .filter(|pkg| pkg.name() != name)
-            .filter(|pkg| satisfies_repo_pkg(conflict, pkg, false))
-            .for_each(|pkg| {
-                conflicts
-                    .entry(name.to_string())
-                    .or_insert_with(|| Conflict::new(name.to_string()))
-                    .push(pkg.name().to_string(), conflict);
-            });
-
-        Ok(())
-    }
-
-    fn check_forward_conflicts(&self, conflicts: &mut ConflictMap) -> Result<(), Error> {
-        for pkg in self.actions.install.iter() {
-            for conflict in pkg.pkg.conflicts() {
-                self.check_forward_conflict(pkg.pkg.name(), &conflict, conflicts)?;
-            }
-        }
-
-        for pkg in self.actions.iter_build_pkgs() {
-            for conflict in &pkg.pkg.conflicts {
-                self.check_forward_conflict(&pkg.pkg.name, &Depend::new(conflict), conflicts)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn check_inner_conflicts(&self, conflicts: &mut ConflictMap) {
-        for pkg in self.actions.install.iter() {
-            for conflict in pkg.pkg.conflicts() {
-                self.check_reverse_conflict(pkg.pkg.name(), &conflict, conflicts)
-            }
-        }
-
-        for pkg in self.actions.iter_build_pkgs() {
-            for conflict in pkg.pkg.conflicts.iter() {
-                self.check_reverse_conflict(&pkg.pkg.name, &Depend::new(conflict), conflicts)
-            }
-        }
-    }
-
-    fn check_reverse_conflicts(&self, conflicts: &mut ConflictMap) -> Result<(), Error> {
-        self.alpm
-            .localdb()
-            .pkgs()?
-            .filter(|pkg| !self.has_pkg(pkg.name()))
-            .for_each(|pkg| {
-                pkg.conflicts().for_each(|conflict| {
-                    self.check_reverse_conflict(pkg.name(), &conflict, conflicts)
-                })
-            });
-
-        Ok(())
-    }
-
-    fn calculate_conflicts(&mut self) -> Result<(), Error> {
-        let mut conflicts = ConflictMap::new();
-        let mut inner_conflicts = ConflictMap::new();
-
-        self.check_inner_conflicts(&mut inner_conflicts);
-        self.check_reverse_conflicts(&mut conflicts)?;
-        self.check_forward_conflicts(&mut conflicts)?;
-
-        self.actions.conflicts = conflicts.into_iter().map(|(_, v)| v).collect();
-        self.actions.inner_conflicts = inner_conflicts.into_iter().map(|(_, v)| v).collect();
-
-        self.actions.conflicts.sort();
-        self.actions.inner_conflicts.sort();
-
-        Ok(())
-    }
-}
-
 fn is_ver_char(c: char) -> bool {
     match c {
         '<' | '=' | '>' => true,
@@ -946,6 +786,7 @@ fn split_pkgname(c: char) -> bool {
 mod tests {
     use super::*;
     use crate::tests::*;
+    use crate::Conflict;
     use alpm::SigLevel;
     use simplelog::{ConfigBuilder, LevelFilter, TermLogger, TerminalMode};
 
@@ -4194,6 +4035,7 @@ mod tests {
                 .count();
 
         TestActions {
+            duplicates: actions.duplicate_targets(),
             install,
             build,
             missing: actions
@@ -4202,7 +4044,6 @@ mod tests {
                 .map(|m| m.stack.into_iter().chain(Some(m.dep)).collect())
                 .collect(),
             make,
-            duplicates: actions.duplicates,
         }
     }
 
@@ -4446,14 +4287,18 @@ mod tests {
             .resolve_targets(&["yay", "yay-git", "yay-bin"])
             .unwrap();
 
-        let mut conflict1 = Conflict::new("yay-bin".into());
-        conflict1.push("yay".into(), &Depend::new("yay"));
+        let mut conflict1 = Conflict::new("yay".into());
         conflict1.push("yay-git".into(), &Depend::new("yay"));
-        let mut conflict2 = Conflict::new("yay-git".into());
-        conflict2.push("yay".into(), &Depend::new("yay"));
-        conflict2.push("yay-bin".into(), &Depend::new("yay"));
+        conflict1.push("yay-bin".into(), &Depend::new("yay"));
+        let mut conflict2 = Conflict::new("yay-bin".into());
+        conflict2.push("yay-git".into(), &Depend::new("yay"));
+        let mut conflict3 = Conflict::new("yay-git".into());
+        conflict3.push("yay-bin".into(), &Depend::new("yay"));
 
-        assert_eq!(actions.inner_conflicts, vec![conflict1, conflict2]);
+        assert_eq!(
+            actions.calculate_inner_conflicts().unwrap(),
+            vec![conflict1, conflict2, conflict3]
+        );
     }
 
     #[test]
@@ -4467,7 +4312,7 @@ mod tests {
         let mut conflict = Conflict::new("pacman-git".into());
         conflict.push("pacman".into(), &Depend::new("pacman"));
 
-        assert_eq!(actions.conflicts, vec![conflict]);
+        assert_eq!(actions.calculate_conflicts().unwrap(), vec![conflict]);
     }
 
     #[test]
@@ -4570,23 +4415,30 @@ mod tests {
             .iter()
             .for_each(|m| println!("missing {:?}", m));
 
-        actions.conflicts.iter().for_each(|c| {
+        actions.calculate_conflicts().unwrap().iter().for_each(|c| {
             println!("c {}: ", c.pkg);
             c.conflicting
                 .iter()
                 .for_each(|c| println!("    {} ({:?})", c.pkg, c.conflict))
         });
 
-        actions.inner_conflicts.iter().for_each(|c| {
-            println!("c {}: ", c.pkg);
-            c.conflicting
-                .iter()
-                .for_each(|c| println!("    {} ({:?})", c.pkg, c.conflict))
-        });
+        actions
+            .calculate_inner_conflicts()
+            .unwrap()
+            .iter()
+            .for_each(|c| {
+                println!("c {}: ", c.pkg);
+                c.conflicting
+                    .iter()
+                    .for_each(|c| println!("    {} ({:?})", c.pkg, c.conflict))
+            });
 
         actions.unneeded.iter().for_each(|p| println!("u {}", p));
 
-        actions.duplicates.iter().for_each(|p| println!("d {}", p));
+        actions
+            .duplicate_targets()
+            .iter()
+            .for_each(|p| println!("d {}", p));
 
         println!(
             "build: {}",
