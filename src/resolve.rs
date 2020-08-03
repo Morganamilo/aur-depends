@@ -319,13 +319,21 @@ where
             self.resolve_aur_pkg(&pkg)?;
             self.stack.pop().unwrap();
 
+            if self
+                .actions
+                .iter_build_pkgs()
+                .any(|p| p.pkg.name == pkg.name)
+            {
+                continue;
+            }
+
             let p = AurPackage {
                 pkg: pkg.clone(),
                 make: false,
                 target: true,
             };
 
-            self.push_build(pkg.package_base.clone(), p);
+            self.push_build(&pkg.package_base, p);
         }
 
         if self.flags.contains(Flags::CALCULATE_MAKE) {
@@ -459,7 +467,7 @@ where
                     target: false,
                 };
 
-                self.push_build(pkg.package_base.clone(), p);
+                self.push_build(&pkg.package_base, p);
             }
         }
 
@@ -698,7 +706,7 @@ where
         self.alpm.syncdbs().find_satisfier(target)
     }
 
-    fn push_build(&mut self, pkgbase: String, pkg: AurPackage) {
+    fn push_build(&mut self, pkgbase: &str, pkg: AurPackage) {
         for base in &mut self.actions.build {
             if base.package_base() == pkgbase {
                 base.pkgs.push(pkg);
