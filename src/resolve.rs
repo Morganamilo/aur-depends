@@ -7,9 +7,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use alpm::{Alpm, Db, Depend, Version};
-use alpm::{Alpm, Depend, Version};
-use alpm_utils::{AsTarg, DbListExt};
-use alpm_utils::{DbListExt, Target};
+use alpm_utils::AsTarg;
 use log::Level::Trace;
 use log::{debug, error, log_enabled, trace};
 use raur::{Raur, SearchBy};
@@ -279,13 +277,13 @@ where
     }
 
     /// Resolve a list of targets.
-    pub fn resolve_targets(mut self, pkgs: &[&str]) -> Result<Actions<'a>, Error> {
+    pub fn resolve_targets<T: AsTarg>(mut self, pkgs: &[T]) -> Result<Actions<'a>, Error> {
         let mut aur_targets = Vec::new();
         let mut repo_targets = Vec::new();
         let localdb = self.alpm.localdb();
 
         for pkg in pkgs {
-            let pkg = Target::from(pkg);
+            let pkg = pkg.as_targ();
             if pkg.repo == Some("aur") && self.flags.contains(Flags::AUR_NAMESPACE) {
                 aur_targets.push(pkg.pkg);
                 continue;
