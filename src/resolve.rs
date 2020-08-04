@@ -8,8 +8,8 @@ use std::fmt;
 
 use alpm::{Alpm, Db, Depend, Version};
 use alpm_utils::AsTarg;
-use log::Level::Trace;
-use log::{debug, error, log_enabled, trace};
+use log::Level::Debug;
+use log::{debug, error, log_enabled};
 use raur::{Raur, SearchBy};
 use raur_ext::{Cache, RaurExt};
 
@@ -435,6 +435,10 @@ where
 
             debug!("satisfiers for '{:?}': {:?})", dep.to_string(), pkgs);
 
+            if let Some(pkg) = pkgs.iter().find(|&&p| p == dep.name()) {
+                return Ok(self.cache.get(*pkg));
+            }
+
             if pkgs.len() == 1 {
                 return Ok(self.cache.get(pkgs[0]));
             } else if pkgs.is_empty() {
@@ -498,9 +502,9 @@ where
                     pkg.clone()
                 } else {
                     debug!("failed to find '{}' in aur cache", dep.to_string(),);
-                    if log_enabled!(Trace) {
-                        trace!(
-                            "at time of failure plgcache is: {:?}\n",
+                    if log_enabled!(Debug) {
+                        debug!(
+                            "at time of failure pkgcache is: {:?}\n",
                             self.cache.iter().map(|p| &p.name).collect::<Vec<_>>()
                         );
                     }
@@ -596,9 +600,9 @@ where
                 }
             }
 
-            if log_enabled!(Trace) {
+            if log_enabled!(Debug) {
                 debug!(
-                    "provides resolved {:?} found {:?}\n",
+                    "provides resolved {:?} found {:?}",
                     pkgs.iter().map(AsRef::as_ref).collect::<Vec<_>>(),
                     info.iter().map(|p| p.name.clone()).collect::<Vec<_>>()
                 );
@@ -693,12 +697,23 @@ where
                 if self.satisfied_local(&dep).unwrap()
                     || self.find_repo_satisfier(&pkg).is_some()
                     || (self.find_satisfier_aur_cache(&dep).is_some()
-                        || self.resolved.contains(dep.name()))
+                        || self.resolved.contains(&dep.to_string()))
                 {
+                    if log_enabled!(Debug) {
+                        debug!(
+                        "{} is satisfied so skipping: local={} repo={} aur_cache={} resolved={}",
+                        dep.to_string(),
+                        self.satisfied_local(&dep).unwrap(),
+                        self.find_repo_satisfier(&pkg).is_some(),
+                        self.find_satisfier_aur_cache(&dep).is_some(),
+                        self.resolved.contains(&dep.to_string())
+                    );
+                    }
+
                     continue;
                 }
 
-                self.resolved.insert(dep.name().to_string());
+                self.resolved.insert(dep.to_string());
                 new_pkgs.push(pkg.clone());
             }
         }
