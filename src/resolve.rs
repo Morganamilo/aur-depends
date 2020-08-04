@@ -626,7 +626,7 @@ where
                 continue;
             }
 
-            for word in pkg.rsplitn(2, split_pkgname).last() {
+            if let Some(word) = pkg.rsplitn(2, split_pkgname).last() {
                 debug!("provide search: {} {}", pkg, word);
                 to_info.extend(
                     //TODO: async?
@@ -828,17 +828,11 @@ where
 }
 
 fn is_ver_char(c: char) -> bool {
-    match c {
-        '<' | '=' | '>' => true,
-        _ => false,
-    }
+    matches!(c, '<' | '=' | '>')
 }
 
 fn split_pkgname(c: char) -> bool {
-    match c {
-        '-' | '_' | '>' => true,
-        _ => false,
-    }
+    matches!(c, '-' | '_' | '>')
 }
 
 #[cfg(test)]
