@@ -591,7 +591,7 @@ where
                             satisfies_aur_pkg(dep, info, self.flags.contains(Flags::NO_DEP_VERSION))
                         })
                     })
-                    .map(|dep| dep.name().to_string())
+                    .map(|dep| dep.to_string())
                     .collect::<Vec<_>>();
 
                 if !missing.is_empty() {
