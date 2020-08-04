@@ -6,7 +6,9 @@ use bitflags::bitflags;
 use std::collections::HashSet;
 use std::fmt;
 
+use alpm::{Alpm, Db, Depend, Version};
 use alpm::{Alpm, Depend, Version};
+use alpm_utils::{AsTarg, DbListExt};
 use alpm_utils::{DbListExt, Target};
 use log::Level::Trace;
 use log::{debug, error, log_enabled, trace};
@@ -61,6 +63,7 @@ impl Default for Flags {
 }
 
 struct ProviderCallback(Box<dyn Fn(&str, &[&str]) -> usize>);
+struct GroupCallback<'a>(Box<dyn Fn(&[Group<'a>]) -> Vec<alpm::Package<'a>>>);
 
 impl fmt::Debug for ProviderCallback {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
@@ -68,10 +71,30 @@ impl fmt::Debug for ProviderCallback {
     }
 }
 
+impl<'a> fmt::Debug for GroupCallback<'a> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.write_str("GroupCallback")
+    }
+}
+
+impl<'a> GroupCallback<'a> {
+    fn new<F: Fn(&[Group<'a>]) -> Vec<alpm::Package<'a>> + 'static>(f: F) -> Self {
+        GroupCallback(Box::new(f))
+    }
+}
+
 impl ProviderCallback {
     fn new<F: Fn(&str, &[&str]) -> usize + 'static>(f: F) -> Self {
         ProviderCallback(Box::new(f))
     }
+}
+
+/// An alpm Db+Group pair passed to the group callback.
+pub struct Group<'a> {
+    /// The db the group belongs to.
+    pub db: Db<'a>,
+    /// The group.
+    pub group: alpm::Group<'a>,
 }
 
 /// Resolver is the main type for resolving dependencies
@@ -125,6 +148,7 @@ pub struct Resolver<'a, H: Raur = raur::Handle> {
     seen: HashSet<String>,
     flags: Flags,
     provider_callback: Option<ProviderCallback>,
+    group_callback: Option<GroupCallback<'a>>,
 }
 
 impl<'a, H> Resolver<'a, H>
@@ -151,6 +175,7 @@ where
             flags,
             seen: HashSet::new(),
             provider_callback: None,
+            group_callback: None,
         }
     }
 
@@ -165,6 +190,19 @@ where
     /// Retuning an invalid index will cause a panic.
     pub fn provider_callback<F: Fn(&str, &[&str]) -> usize + 'static>(mut self, f: F) -> Self {
         self.provider_callback = Some(ProviderCallback::new(f));
+        self
+    }
+
+    /// Set the group callback
+    ///
+    /// The group callback is called whenever a group is processed. The callback recieves the group
+    /// and returns a list of packages should be installed from the group;
+    ///
+    pub fn group_callback<F: Fn(&[Group<'a>]) -> Vec<alpm::Package<'a>> + 'static>(
+        mut self,
+        f: F,
+    ) -> Self {
+        self.group_callback = Some(GroupCallback::new(f));
         self
     }
 
@@ -254,8 +292,29 @@ where
             }
 
             if !self.flags.contains(Flags::AUR_ONLY) {
-                if let Some(alpm_pkg) = self.alpm.syncdbs().find_target_satisfier(pkg)? {
+                if let Some(alpm_pkg) = self.alpm.syncdbs().find_satisfier(pkg.pkg) {
                     repo_targets.push((pkg, alpm_pkg));
+                    continue;
+                }
+
+                let groups = self
+                    .alpm
+                    .syncdbs()
+                    .filter(|db| pkg.repo.is_none() || pkg.repo.unwrap() == db.name())
+                    .filter_map(|db| db.group(pkg.pkg).map(|group| Group { db, group }).ok())
+                    .collect::<Vec<_>>();
+                if !groups.is_empty() {
+                    if let Some(ref f) = self.group_callback {
+                        for alpm_pkg in f.0(&groups) {
+                            repo_targets.push((pkg, alpm_pkg));
+                        }
+                    } else {
+                        for group in groups {
+                            for alpm_pkg in group.group.packages() {
+                                repo_targets.push((pkg, alpm_pkg));
+                            }
+                        }
+                    }
                     continue;
                 }
             }
