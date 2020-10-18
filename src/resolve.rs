@@ -1,4 +1,6 @@
-use crate::actions::{Actions, AurPackage, AurUpdate, AurUpdates, Base, Missing, RepoPackage};
+use crate::actions::{
+    Actions, AurPackage, AurUpdate, AurUpdates, Base, Missing, RepoPackage, Unneeded,
+};
 use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
 use crate::Error;
 use bitflags::bitflags;
@@ -336,14 +338,14 @@ where
             if self.flags.contains(Flags::NEEDED) {
                 if let Ok(local) = localdb.pkg(alpm_pkg.name()) {
                     if local.version() >= alpm_pkg.version() {
-                        up_to_date = true
+                        up_to_date = true;
+                        let unneeded = Unneeded::new(pkg.to_string(), local.version().to_string());
+                        self.actions.unneeded.push(unneeded);
                     }
                 }
             }
 
-            if up_to_date {
-                self.actions.unneeded.push(pkg.to_string());
-            } else {
+            if !up_to_date {
                 self.resolve_repo_pkg(alpm_pkg, true)?;
             }
         }
@@ -365,13 +367,15 @@ where
             if self.flags.contains(Flags::NEEDED) {
                 if let Ok(local) = localdb.pkg(&pkg.name) {
                     if local.version() >= Version::new(&pkg.version) {
-                        up_to_date = true
+                        up_to_date = true;
+                        let unneeded =
+                            Unneeded::new(aur_pkg.to_string(), local.version().to_string());
+                        self.actions.unneeded.push(unneeded);
                     }
                 }
             }
 
             if up_to_date {
-                self.actions.unneeded.push(aur_pkg.to_string());
                 continue;
             }
 
@@ -4501,7 +4505,10 @@ mod tests {
                     .for_each(|c| println!("    {} ({:?})", c.pkg, c.conflict))
             });
 
-        actions.unneeded.iter().for_each(|p| println!("u {}", p));
+        actions
+            .unneeded
+            .iter()
+            .for_each(|p| println!("u {}", p.name));
 
         actions
             .duplicate_targets()

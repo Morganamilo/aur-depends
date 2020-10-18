@@ -19,7 +19,7 @@ pub struct Actions<'a> {
     /// a hard error.
     pub missing: Vec<Missing>,
     /// Targets that are up to date.
-    pub unneeded: Vec<String>,
+    pub unneeded: Vec<Unneeded>,
     /// Aur packages to build.
     pub build: Vec<Base>,
     /// Repo packages to install.
@@ -30,6 +30,25 @@ impl<'a> Actions<'a> {
     /// An iterator over each individual package in self.build.
     pub fn iter_build_pkgs(&self) -> impl Iterator<Item = &AurPackage> {
         self.build.iter().flat_map(|b| &b.pkgs)
+    }
+}
+
+/// Information about an up to date package
+#[derive(Debug, Eq, Clone, PartialEq, Ord, PartialOrd, Hash)]
+pub struct Unneeded {
+    /// Package name
+    pub name: String,
+    /// Package version
+    pub version: String,
+}
+
+impl Unneeded {
+    /// Create a new Unneeded
+    pub fn new<S: Into<String>>(name: S, version: S) -> Self {
+        Unneeded {
+            name: name.into(),
+            version: version.into(),
+        }
     }
 }
 
