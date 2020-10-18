@@ -457,7 +457,7 @@ where
                 pkgs.swap(true_pkg, 0);
             }
 
-            pkgs[1..].sort();
+            pkgs[1..].sort_unstable();
 
             let choice = f.0(dep.to_string().as_str(), &pkgs);
             debug!("choice was: {}={}", choice, pkgs[choice]);
@@ -572,7 +572,7 @@ where
             .iter()
             .map(|p| p.as_ref().split(is_ver_char).next().unwrap())
             .collect::<Vec<_>>();
-        pkgs_nover.sort();
+        pkgs_nover.sort_unstable();
         pkgs_nover.dedup();
 
         if (!target && self.flags.contains(Flags::PROVIDES))
