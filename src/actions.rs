@@ -60,12 +60,18 @@ pub struct Base {
 impl Display for Base {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if self.pkgs.len() == 1 && self.pkgs[0].pkg.name == self.package_base() {
-            f.write_str(&self.pkgs[0].pkg.name)?;
+            write!(f, "{}-{}", self.package_base(), self.version())?;
         } else {
-            write!(f, "{} ({}", self.package_base(), self.pkgs[0].pkg.name)?;
+            write!(
+                f,
+                "{}-{} ({}",
+                self.package_base(),
+                self.version(),
+                self.pkgs[0].pkg.name
+            )?;
             for pkg in self.pkgs.iter().skip(1) {
-                f.write_str(&pkg.pkg.name)?;
                 f.write_str(" ")?;
+                f.write_str(&pkg.pkg.name)?;
             }
             f.write_str(")")?;
         }
@@ -77,6 +83,11 @@ impl Base {
     /// Gets the package base of base.
     pub fn package_base(&self) -> &str {
         self.pkgs[0].pkg.package_base.as_str()
+    }
+
+    /// Gets the version of base.
+    pub fn version(&self) -> &str {
+        self.pkgs[0].pkg.version.as_str()
     }
 }
 
