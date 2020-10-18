@@ -34,7 +34,7 @@ impl<'a> Actions<'a> {
 }
 
 /// Wrapper around a package for extra metadata.
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Eq, Clone, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Package<T> {
     /// The underlying package
     pub pkg: T,
@@ -51,7 +51,7 @@ pub type AurPackage = Package<raur_ext::Package>;
 pub type RepoPackage<'a> = Package<alpm::Package<'a>>;
 
 /// A package base.
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Eq, Clone, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Base {
     /// The packages that should be installed from the pkgbase.
     pub pkgs: Vec<AurPackage>,
@@ -129,6 +129,7 @@ pub struct AurUpdate<'a> {
 }
 
 /// Collection of AUR updates and missing packages
+#[derive(Debug)]
 pub struct AurUpdates<'a> {
     /// The updates.
     pub updates: Vec<AurUpdate<'a>>,
@@ -137,7 +138,7 @@ pub struct AurUpdates<'a> {
 }
 
 /// A package that could not be resolved.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Missing {
     /// The Dependency we failed to satisfy.
     pub dep: String,
