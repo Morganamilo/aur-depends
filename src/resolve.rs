@@ -239,12 +239,12 @@ where
             .localdb()
             .pkgs()?
             .filter(|p| self.alpm.syncdbs().find_satisfier(p.name()).is_none())
-            .filter(|pkg| !pkg.should_ignore())
             .collect::<Vec<_>>();
 
         let local_pkg_names = local_pkgs.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
         self.raur.cache_info(self.cache, &local_pkg_names)?;
         let mut missing = Vec::new();
+        let mut ignored = Vec::new();
 
         let to_upgrade = local_pkgs
             .into_iter()
@@ -257,10 +257,17 @@ where
                     };
 
                     if should_upgrade {
+                        let should_ignore = local_pkg.should_ignore();
+
                         let up = AurUpdate {
                             local: local_pkg,
                             remote: pkg.clone(),
                         };
+                        if should_ignore {
+                            ignored.push(up);
+                            return None;
+                        }
+
                         return Some(up);
                     }
                 } else {
@@ -274,6 +281,7 @@ where
         let updates = AurUpdates {
             updates: to_upgrade,
             missing,
+            ignored,
         };
         Ok(updates)
     }

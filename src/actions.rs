@@ -159,16 +159,18 @@ pub struct AurUpdate<'a> {
 }
 
 /// Collection of AUR updates and missing packages
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AurUpdates<'a> {
     /// The updates.
     pub updates: Vec<AurUpdate<'a>>,
     /// Foreign that were not found in the AUR.
     pub missing: Vec<alpm::Package<'a>>,
+    /// Packages that matched ignore pkg/group
+    pub ignored: Vec<AurUpdate<'a>>,
 }
 
 /// A package that could not be resolved.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Missing {
     /// The Dependency we failed to satisfy.
     pub dep: String,
