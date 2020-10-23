@@ -437,7 +437,7 @@ where
         dep: &Dep,
         target: bool,
     ) -> Result<Option<&raur_ext::Package>, Error> {
-        if let Some(f) = &self.provider_callback {
+        if let Some(ref f) = self.provider_callback {
             let mut pkgs = self
                 .cache
                 .iter()
@@ -449,8 +449,11 @@ where
 
             debug!("satisfiers for '{:?}': {:?})", dep.to_string(), pkgs);
 
-            if let Some(pkg) = pkgs.iter().find(|&&p| p == dep.name()) {
-                return Ok(self.cache.get(*pkg));
+            if !target {
+                if let Some(pkg) = pkgs.iter().find(|&&p| p == dep.name()) {
+                    debug!("picked from cache: {}", pkg);
+                    return Ok(self.cache.get(*pkg));
+                }
             }
 
             if pkgs.len() == 1 {
@@ -477,6 +480,7 @@ where
             debug!("choice was: {}={}", choice, pkgs[choice]);
             Ok(self.cache.get(pkgs[choice]))
         } else {
+            debug!("no provider callback");
             Ok(self.find_satisfier_aur_cache(dep))
         }
     }
@@ -633,6 +637,8 @@ where
             .iter()
             .map(|s| s.as_ref().to_string())
             .collect::<Vec<_>>();
+
+        debug!("cache args: {:?}\n", to_info);
         for pkg in pkgs {
             let pkg = pkg.as_ref();
 
@@ -659,6 +665,9 @@ where
                 );
             }
         }
+
+        to_info.sort();
+        to_info.dedup();
 
         debug!("trying to cache {:?}\n", to_info);
 
@@ -790,6 +799,7 @@ where
     }
 
     fn push_build(&mut self, pkgbase: &str, pkg: AurPackage) {
+        debug!("pushing to build: {}", pkg.pkg.name);
         for base in &mut self.actions.build {
             if base.package_base() == pkgbase {
                 base.pkgs.push(pkg);
@@ -1282,8 +1292,23 @@ mod tests {
     }
 
     #[test]
+    fn test_satisfied_versioned_repo_dep_nover() {
+        let TestActions { build, install, .. } = resolve(
+            &["satisfied_versioned_repo_dep"],
+            Flags::new() | Flags::NO_DEP_VERSION,
+        );
+        assert_eq!(build, vec!["satisfied_versioned_repo_dep"]);
+        assert!(install.is_empty());
+
+        let TestActions { missing, .. } = resolve(
+            &["satisfied_versioned_repo_dep"],
+            Flags::new() | Flags::NO_DEP_VERSION,
+        );
+        assert_eq!(missing, Vec::<Vec<String>>::new());
+    }
+
+    #[test]
     fn test_resolve_targets() {
-        //init_logger();
         let raur = raur();
         //let raur = raur::Handle::default();
         let alpm = alpm();
