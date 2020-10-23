@@ -1,20 +1,20 @@
-use alpm::{Depend, Ver, Version};
+use alpm::{AsDep, Dep, Depend, Ver, Version};
 use alpm_utils::depends;
 
-pub fn satisfies_aur_pkg(dep: &Depend, pkg: &raur::Package, nover: bool) -> bool {
+pub fn satisfies_aur_pkg(dep: &Dep, pkg: &raur::Package, nover: bool) -> bool {
     let provides = pkg.provides.iter().map(|p| Depend::new(p));
     satisfies(dep, &pkg.name, Version::new(&pkg.version), provides, nover)
 }
 
-pub fn satisfies_repo_pkg(dep: &Depend, pkg: &alpm::Package, nover: bool) -> bool {
-    satisfies(dep, pkg.name(), pkg.version(), pkg.provides(), nover)
+pub fn satisfies_repo_pkg(dep: &Dep, pkg: &alpm::Package, nover: bool) -> bool {
+    satisfies(dep, pkg.name(), pkg.version(), pkg.provides().iter(), nover)
 }
 
-pub fn satisfies<'a, S: AsRef<str>, V: AsRef<Ver>>(
-    dep: &Depend,
+pub fn satisfies<'a, D: AsDep, S: AsRef<str>, V: AsRef<Ver>>(
+    dep: &Dep,
     name: S,
     version: V,
-    provides: impl Iterator<Item = Depend<'a>>,
+    provides: impl Iterator<Item = D>,
     nover: bool,
 ) -> bool {
     if nover {

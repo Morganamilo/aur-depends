@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
 use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
-use alpm::{Alpm, DepMod, Depend};
+use alpm::{Alpm, Dep, DepMod, Depend};
 
 type ConflictMap = HashMap<String, Conflict>;
 
@@ -138,7 +138,7 @@ impl Conflict {
     }
 
     /// Push a new conflicting to the conflict.
-    pub fn push(&mut self, pkg: String, conflict: &Depend) {
+    pub fn push(&mut self, pkg: String, conflict: &Dep) {
         let conflict = if pkg != conflict.name() || conflict.depmod() != DepMod::Any {
             Some(conflict.to_string())
         } else {
@@ -190,7 +190,7 @@ impl<'a> Actions<'a> {
     fn check_reverse_conflict<S: AsRef<str>>(
         &self,
         name: S,
-        conflict: &Depend,
+        conflict: &Dep,
         conflicts: &mut ConflictMap,
     ) {
         let name = name.as_ref();
@@ -223,13 +223,14 @@ impl<'a> Actions<'a> {
     fn check_forward_conflict<S: AsRef<str>>(
         &self,
         name: S,
-        conflict: &Depend,
+        conflict: &Dep,
         conflicts: &mut ConflictMap,
-    ) -> Result<(), Error> {
+    ) {
         let name = name.as_ref();
         self.alpm
             .localdb()
-            .pkgs()?
+            .pkgs()
+            .iter()
             .filter(|pkg| !self.has_pkg(pkg.name()))
             .filter(|pkg| pkg.name() != name)
             .filter(|pkg| satisfies_repo_pkg(conflict, pkg, false))
@@ -239,24 +240,20 @@ impl<'a> Actions<'a> {
                     .or_insert_with(|| Conflict::new(name.to_string()))
                     .push(pkg.name().to_string(), conflict);
             });
-
-        Ok(())
     }
 
-    fn check_forward_conflicts(&self, conflicts: &mut ConflictMap) -> Result<(), Error> {
+    fn check_forward_conflicts(&self, conflicts: &mut ConflictMap) {
         for pkg in self.install.iter() {
             for conflict in pkg.pkg.conflicts() {
-                self.check_forward_conflict(pkg.pkg.name(), &conflict, conflicts)?;
+                self.check_forward_conflict(pkg.pkg.name(), &conflict, conflicts);
             }
         }
 
         for pkg in self.iter_build_pkgs() {
             for conflict in &pkg.pkg.conflicts {
-                self.check_forward_conflict(&pkg.pkg.name, &Depend::new(conflict), conflicts)?;
+                self.check_forward_conflict(&pkg.pkg.name, &Depend::new(conflict), conflicts);
             }
         }
-
-        Ok(())
     }
 
     fn check_inner_conflicts(&self, conflicts: &mut ConflictMap) {
@@ -273,18 +270,17 @@ impl<'a> Actions<'a> {
         }
     }
 
-    fn check_reverse_conflicts(&self, conflicts: &mut ConflictMap) -> Result<(), Error> {
+    fn check_reverse_conflicts(&self, conflicts: &mut ConflictMap) {
         self.alpm
             .localdb()
-            .pkgs()?
+            .pkgs()
+            .iter()
             .filter(|pkg| !self.has_pkg(pkg.name()))
             .for_each(|pkg| {
-                pkg.conflicts().for_each(|conflict| {
+                pkg.conflicts().iter().for_each(|conflict| {
                     self.check_reverse_conflict(pkg.name(), &conflict, conflicts)
                 })
             });
-
-        Ok(())
     }
 
     /// Calculate conflicts. Do note that even with conflicts it can still be possible to continue and
@@ -295,11 +291,11 @@ impl<'a> Actions<'a> {
     ///
     /// However other cases are more complex and can not be automatically resolved. So it is up to
     /// the user to decide how to handle these.
-    pub fn calculate_conflicts(&self) -> Result<Vec<Conflict>, Error> {
+    pub fn calculate_conflicts(&self) -> Vec<Conflict> {
         let mut conflicts = ConflictMap::new();
 
-        self.check_reverse_conflicts(&mut conflicts)?;
-        self.check_forward_conflicts(&mut conflicts)?;
+        self.check_reverse_conflicts(&mut conflicts);
+        self.check_forward_conflicts(&mut conflicts);
 
         let mut conflicts = conflicts
             .into_iter()
@@ -307,8 +303,7 @@ impl<'a> Actions<'a> {
             .collect::<Vec<Conflict>>();
 
         conflicts.sort();
-
-        Ok(conflicts)
+        conflicts
     }
 
     /// Calculate inner conflicts. Do note that even with conflicts it can still be possible to continue and

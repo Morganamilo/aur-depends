@@ -8,7 +8,7 @@ use bitflags::bitflags;
 use std::collections::HashSet;
 use std::fmt;
 
-use alpm::{Alpm, Db, Depend, Version};
+use alpm::{Alpm, Db, Dep, Depend, Version};
 use alpm_utils::AsTarg;
 use log::Level::Debug;
 use log::{debug, error, log_enabled};
@@ -237,7 +237,8 @@ where
         let local_pkgs = self
             .alpm
             .localdb()
-            .pkgs()?
+            .pkgs()
+            .iter()
             .filter(|p| self.alpm.syncdbs().find_satisfier(p.name()).is_none())
             .collect::<Vec<_>>();
 
@@ -308,6 +309,7 @@ where
                 let groups = self
                     .alpm
                     .syncdbs()
+                    .iter()
                     .filter(|db| pkg.repo.is_none() || pkg.repo.unwrap() == db.name())
                     .filter_map(|db| db.group(pkg.pkg).map(|group| Group { db, group }).ok())
                     .collect::<Vec<_>>();
@@ -415,7 +417,7 @@ where
         Ok(self.actions)
     }
 
-    fn find_satisfier_aur_cache(&self, dep: &Depend) -> Option<&raur_ext::Package> {
+    fn find_satisfier_aur_cache(&self, dep: &Dep) -> Option<&raur_ext::Package> {
         if let Some(pkg) = self.cache.get(dep.name()) {
             if satisfies_aur_pkg(dep, pkg, self.flags.contains(Flags::NO_DEP_VERSION)) {
                 return Some(pkg);
@@ -432,7 +434,7 @@ where
     /// unless we are looking for a target, then always show all options.
     fn select_satisfier_aur_cache(
         &self,
-        dep: &Depend,
+        dep: &Dep,
         target: bool,
     ) -> Result<Option<&raur_ext::Package>, Error> {
         if let Some(f) = &self.provider_callback {
@@ -733,7 +735,7 @@ where
         self.cache_aur_pkgs_recursive(&new_pkgs, false)
     }
 
-    fn satisfied_build(&self, target: &Depend) -> bool {
+    fn satisfied_build(&self, target: &Dep) -> bool {
         self.actions
             .build
             .iter()
@@ -747,7 +749,7 @@ where
             })
     }
 
-    fn satisfied_install(&self, target: &Depend) -> bool {
+    fn satisfied_install(&self, target: &Dep) -> bool {
         self.actions.install.iter().any(|install| {
             satisfies_repo_pkg(
                 target,
@@ -757,7 +759,7 @@ where
         })
     }
 
-    fn satisfied_local(&self, target: &Depend) -> Result<bool, Error> {
+    fn satisfied_local(&self, target: &Dep) -> Result<bool, Error> {
         if let Ok(pkg) = self.alpm.localdb().pkg(target.name()) {
             if satisfies_repo_pkg(target, &pkg, self.flags.contains(Flags::NO_DEP_VERSION)) {
                 return Ok(true);
@@ -765,13 +767,13 @@ where
         }
 
         if self.flags.contains(Flags::NO_DEP_VERSION) {
-            let ret = self.alpm.localdb().pkgs()?.find_satisfier(target.name());
+            let ret = self.alpm.localdb().pkgs().find_satisfier(target.name());
             Ok(ret.is_some())
         } else {
             let ret = self
                 .alpm
                 .localdb()
-                .pkgs()?
+                .pkgs()
                 .find_satisfier(target.to_string());
             Ok(ret.is_some())
         }
@@ -807,7 +809,7 @@ where
             .install
             .iter()
             .filter(|p| !p.make)
-            .for_each(|p| runtime.extend(p.pkg.depends()));
+            .for_each(|p| runtime.extend(p.pkg.depends().iter().map(|d| d.to_depend())));
         self.actions
             .build
             .iter()
@@ -829,7 +831,7 @@ where
                 if satisfied {
                     pkg.make = false;
                     run = true;
-                    runtime.extend(pkg.pkg.depends());
+                    runtime.extend(pkg.pkg.depends().iter().map(|d| d.to_depend()));
                 }
             }
 
@@ -4392,7 +4394,7 @@ mod tests {
         let mut conflict = Conflict::new("pacman-git".into());
         conflict.push("pacman".into(), &Depend::new("pacman"));
 
-        assert_eq!(actions.calculate_conflicts().unwrap(), vec![conflict]);
+        assert_eq!(actions.calculate_conflicts(), vec![conflict]);
     }
 
     #[test]
@@ -4495,7 +4497,7 @@ mod tests {
             .iter()
             .for_each(|m| println!("missing {:?}", m));
 
-        actions.calculate_conflicts().unwrap().iter().for_each(|c| {
+        actions.calculate_conflicts().iter().for_each(|c| {
             println!("c {}: ", c.pkg);
             c.conflicting
                 .iter()
