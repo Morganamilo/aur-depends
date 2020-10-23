@@ -64,6 +64,7 @@ impl Default for Flags {
 
 struct ProviderCallback(Box<dyn Fn(&str, &[&str]) -> usize>);
 struct GroupCallback<'a>(Box<dyn Fn(&[Group<'a>]) -> Vec<alpm::Package<'a>>>);
+struct IsDevel(Box<dyn Fn(&str) -> bool>);
 
 impl fmt::Debug for ProviderCallback {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
@@ -86,6 +87,18 @@ impl<'a> GroupCallback<'a> {
 impl ProviderCallback {
     fn new<F: Fn(&str, &[&str]) -> usize + 'static>(f: F) -> Self {
         ProviderCallback(Box::new(f))
+    }
+}
+
+impl fmt::Debug for IsDevel {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.write_str("IsDevel")
+    }
+}
+
+impl IsDevel {
+    fn new<F: Fn(&str) -> bool + 'static>(f: F) -> Self {
+        IsDevel(Box::new(f))
     }
 }
 
@@ -149,6 +162,7 @@ pub struct Resolver<'a, H: Raur = raur::Handle> {
     flags: Flags,
     provider_callback: Option<ProviderCallback>,
     group_callback: Option<GroupCallback<'a>>,
+    is_devel: Option<IsDevel>,
 }
 
 impl<'a, H> Resolver<'a, H>
@@ -176,6 +190,7 @@ where
             seen: HashSet::new(),
             provider_callback: None,
             group_callback: None,
+            is_devel: None,
         }
     }
 
@@ -203,6 +218,16 @@ where
         f: F,
     ) -> Self {
         self.group_callback = Some(GroupCallback::new(f));
+        self
+    }
+
+    /// Set the function for determining if a package is devel.
+    ///
+    /// Devel packages are never skipped when using NEEDED.
+    ///
+    /// By default, no packages are considered devel.
+    pub fn is_devel<F: Fn(&str) -> bool + 'static>(mut self, f: F) -> Self {
+        self.is_devel = Some(IsDevel::new(f));
         self
     }
 
@@ -375,12 +400,20 @@ where
             let mut up_to_date = false;
 
             if self.flags.contains(Flags::NEEDED) {
-                if let Ok(local) = localdb.pkg(&pkg.name) {
-                    if local.version() >= Version::new(&pkg.version) {
-                        up_to_date = true;
-                        let unneeded =
-                            Unneeded::new(aur_pkg.to_string(), local.version().to_string());
-                        self.actions.unneeded.push(unneeded);
+                let is_devel = self
+                    .is_devel
+                    .as_ref()
+                    .map(|f| f.0(aur_pkg))
+                    .unwrap_or(false);
+
+                if !is_devel {
+                    if let Ok(local) = localdb.pkg(&pkg.name) {
+                        if local.version() >= Version::new(&pkg.version) {
+                            up_to_date = true;
+                            let unneeded =
+                                Unneeded::new(aur_pkg.to_string(), local.version().to_string());
+                            self.actions.unneeded.push(unneeded);
+                        }
                     }
                 }
             }
