@@ -151,12 +151,12 @@ pub struct Group<'a> {
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct Resolver<'a, H: Raur = raur::Handle> {
+pub struct Resolver<'a, 'b, H = raur::Handle> {
     alpm: &'a Alpm,
     resolved: HashSet<String>,
-    cache: &'a mut Cache,
+    cache: &'b mut Cache,
     stack: Vec<String>,
-    raur: &'a H,
+    raur: &'b H,
     actions: Actions<'a>,
     seen: HashSet<String>,
     flags: Flags,
@@ -165,12 +165,12 @@ pub struct Resolver<'a, H: Raur = raur::Handle> {
     is_devel: Option<IsDevel>,
 }
 
-impl<'a, H> Resolver<'a, H>
+impl<'a, 'b, H> Resolver<'a, 'b, H>
 where
     H: Raur<Err = raur::Error>,
 {
     /// Create a new Resolver
-    pub fn new(alpm: &'a Alpm, cache: &'a mut Cache, raur: &'a H, flags: Flags) -> Self {
+    pub fn new(alpm: &'a Alpm, cache: &'b mut Cache, raur: &'b H, flags: Flags) -> Self {
         let actions = Actions {
             alpm,
             missing: Vec::new(),
