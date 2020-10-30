@@ -2,8 +2,8 @@ use alpm::{AsDep, Dep, Depend, Ver, Version};
 use alpm_utils::depends;
 
 pub fn satisfies_aur_pkg(dep: &Dep, pkg: &raur::Package, nover: bool) -> bool {
-    let provides = pkg.provides.iter().map(|p| Depend::new(p));
-    satisfies(dep, &pkg.name, Version::new(&pkg.version), provides, nover)
+    let provides = pkg.provides.iter().map(|p| Depend::new(p.as_str()));
+    satisfies(dep, &pkg.name, Version::new(&*pkg.version), provides, nover)
 }
 
 pub fn satisfies_repo_pkg(dep: &Dep, pkg: &alpm::Package, nover: bool) -> bool {

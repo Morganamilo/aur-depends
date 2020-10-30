@@ -251,7 +251,11 @@ impl<'a> Actions<'a> {
 
         for pkg in self.iter_build_pkgs() {
             for conflict in &pkg.pkg.conflicts {
-                self.check_forward_conflict(&pkg.pkg.name, &Depend::new(conflict), conflicts);
+                self.check_forward_conflict(
+                    &pkg.pkg.name,
+                    &Depend::new(conflict.to_string()),
+                    conflicts,
+                );
             }
         }
     }
@@ -265,7 +269,11 @@ impl<'a> Actions<'a> {
 
         for pkg in self.iter_build_pkgs() {
             for conflict in pkg.pkg.conflicts.iter() {
-                self.check_reverse_conflict(&pkg.pkg.name, &Depend::new(conflict), conflicts)
+                self.check_reverse_conflict(
+                    &pkg.pkg.name,
+                    &Depend::new(conflict.to_string()),
+                    conflicts,
+                )
             }
         }
     }

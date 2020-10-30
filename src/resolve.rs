@@ -277,9 +277,9 @@ where
             .filter_map(|local_pkg| {
                 if let Some(pkg) = self.cache.get(local_pkg.name()) {
                     let should_upgrade = if self.flags.contains(Flags::ENABLE_DOWNGRADE) {
-                        Version::new(&pkg.version) != local_pkg.version()
+                        Version::new(&*pkg.version) != local_pkg.version()
                     } else {
-                        Version::new(&pkg.version) > local_pkg.version()
+                        Version::new(&*pkg.version) > local_pkg.version()
                     };
 
                     if should_upgrade {
@@ -407,8 +407,8 @@ where
                     .unwrap_or(false);
 
                 if !is_devel {
-                    if let Ok(local) = localdb.pkg(&pkg.name) {
-                        if local.version() >= Version::new(&pkg.version) {
+                    if let Ok(local) = localdb.pkg(&*pkg.name) {
+                        if local.version() >= Version::new(&*pkg.version) {
                             up_to_date = true;
                             let unneeded =
                                 Unneeded::new(aur_pkg.to_string(), local.version().to_string());
@@ -533,7 +533,7 @@ where
                 .chain(&pkg.depends);
 
             for dep_str in depends {
-                let dep = Depend::new(dep_str);
+                let dep = Depend::new(dep_str.to_string());
 
                 if self.satisfied_build(&dep)
                     || self.satisfied_local(&dep)?
@@ -748,7 +748,7 @@ where
                 .chain(check.into_iter().flatten());
 
             for pkg in depends {
-                let dep = Depend::new(pkg);
+                let dep = Depend::new(pkg.to_string());
 
                 if self.satisfied_local(&dep).unwrap()
                     || self.find_repo_satisfier(&pkg).is_some()
@@ -858,7 +858,7 @@ where
             .iter()
             .flat_map(|b| &b.pkgs)
             .filter(|p| !p.make)
-            .for_each(|p| runtime.extend(p.pkg.depends.iter().map(|d| Depend::new(d))));
+            .for_each(|p| runtime.extend(p.pkg.depends.iter().map(|d| Depend::new(d.as_str()))));
 
         while run {
             run = false;
@@ -891,7 +891,7 @@ where
                     if satisfied {
                         pkg.make = false;
                         run = true;
-                        runtime.extend(pkg.pkg.depends.iter().map(|d| Depend::new(d)));
+                        runtime.extend(pkg.pkg.depends.iter().map(|d| Depend::new(d.as_str())));
                     }
                 }
             }
