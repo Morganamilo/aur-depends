@@ -264,7 +264,7 @@ where
             .localdb()
             .pkgs()
             .iter()
-            .filter(|p| self.alpm.syncdbs().find_satisfier(p.name()).is_none())
+            .filter(|p| self.find_repo_satisfier(p.name()).is_none())
             .collect::<Vec<_>>();
 
         let local_pkg_names = local_pkgs.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
@@ -326,7 +326,7 @@ where
             }
 
             if !self.flags.contains(Flags::AUR_ONLY) {
-                if let Some(alpm_pkg) = self.alpm.syncdbs().find_satisfier(pkg.pkg) {
+                if let Some(alpm_pkg) = self.find_repo_satisfier(pkg.pkg) {
                     repo_targets.push((pkg, alpm_pkg));
                     continue;
                 }
@@ -751,7 +751,7 @@ where
                 let dep = Depend::new(pkg.to_string());
 
                 if self.satisfied_local(&dep).unwrap()
-                    || self.find_repo_satisfier(&pkg).is_some()
+                    || self.find_repo_satisfier_silent(&pkg).is_some()
                     || (self.find_satisfier_aur_cache(&dep).is_some()
                         || self.resolved.contains(&dep.to_string()))
                 {
@@ -760,7 +760,7 @@ where
                         "{} is satisfied so skipping: local={} repo={} aur_cache={} resolved={}",
                         dep.to_string(),
                         self.satisfied_local(&dep).unwrap(),
-                        self.find_repo_satisfier(&pkg).is_some(),
+                        self.find_repo_satisfier_silent(&pkg).is_some(),
                         self.find_satisfier_aur_cache(&dep).is_some(),
                         self.resolved.contains(&dep.to_string())
                     );
@@ -829,6 +829,14 @@ where
         }
 
         self.alpm.syncdbs().find_satisfier(target)
+    }
+
+    fn find_repo_satisfier_silent<S: AsRef<str>>(&self, target: S) -> Option<alpm::Package<'a>> {
+        let cb = self.alpm.question_cb();
+        self.alpm.set_question_cb(alpm::QuestionCb::none());
+        let pkg = self.find_repo_satisfier(target);
+        self.alpm.set_question_cb(cb);
+        pkg
     }
 
     fn push_build(&mut self, pkgbase: &str, pkg: AurPackage) {

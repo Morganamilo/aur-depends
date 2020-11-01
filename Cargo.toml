@@ -13,7 +13,7 @@ keywords = ["archlinux", "pkgbuild", "arch", "aur"]
 exclude = ["tests"]
 
 [dependencies]
-alpm = "1.0.0"
+alpm = "1.1.0"
 alpm-utils = "0.6.0"
 log = "0.4.11"
 raur = { version = "3.0.1", default-features = false }

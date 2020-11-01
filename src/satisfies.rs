@@ -10,7 +10,7 @@ pub fn satisfies_repo_pkg(dep: &Dep, pkg: &alpm::Package, nover: bool) -> bool {
     satisfies(dep, pkg.name(), pkg.version(), pkg.provides().iter(), nover)
 }
 
-pub fn satisfies<'a, D: AsDep, S: AsRef<str>, V: AsRef<Ver>>(
+pub fn satisfies<D: AsDep, S: AsRef<str>, V: AsRef<Ver>>(
     dep: &Dep,
     name: S,
     version: V,
