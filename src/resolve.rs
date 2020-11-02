@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use alpm::{Alpm, Db, Dep, Depend, Version};
-use alpm_utils::AsTarg;
+use alpm_utils::{AsTarg, DbListExt};
 use log::Level::Debug;
 use log::{debug, error, log_enabled};
 use raur::{Raur, SearchBy};
@@ -264,7 +264,7 @@ where
             .localdb()
             .pkgs()
             .iter()
-            .filter(|p| self.find_repo_satisfier(p.name()).is_none())
+            .filter(|p| self.alpm.syncdbs().pkg(p.name()).is_err())
             .collect::<Vec<_>>();
 
         let local_pkg_names = local_pkgs.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
