@@ -16,14 +16,15 @@ exclude = ["tests"]
 alpm = "1.1.0"
 alpm-utils = "0.6.0"
 log = "0.4.11"
-raur = { version = "3.0.1", default-features = false }
-raur-ext = { version = "2.0.2", default-features = false }
+raur = "4.0.0"
 bitflags = "1.2.1"
 
 [dev-dependencies]
+async-trait = "0.1.41"
 simplelog = "0.8.0"
+tokio = { version = "0.2", features = ["macros"]}
 
 [features]
 git = ["alpm/git", "alpm-utils/git"]
-rustls = ["raur/rustls", "raur-ext/rustls"]
-default = ["raur/default", "raur-ext/default"]
+rustls = ["raur/rustls"]
+default = ["raur/default"]

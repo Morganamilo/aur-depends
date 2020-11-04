@@ -12,8 +12,7 @@ use alpm::{Alpm, Db, Dep, Depend, Version};
 use alpm_utils::{AsTarg, DbListExt};
 use log::Level::Debug;
 use log::{debug, error, log_enabled};
-use raur::{Raur, SearchBy};
-use raur_ext::{Cache, RaurExt};
+use raur::{Cache, Raur, ArcPackage, SearchBy};
 
 bitflags! {
     /// Config options for Handle.
@@ -126,7 +125,8 @@ pub struct Group<'a> {
 ///
 /// ```no_run
 /// # use aur_depends::Error;
-/// # fn run() -> Result<(), Error> {
+/// # #[tokio::test]
+/// # async fn run() -> Result<(), Error> {
 /// use std::collections::HashSet;
 /// use alpm::Alpm;
 /// use raur::Handle;
@@ -137,7 +137,7 @@ pub struct Group<'a> {
 /// let raur = Handle::default();
 /// let mut cache = HashSet::new();
 /// let resolver = Resolver::new(&alpm, &mut cache, &raur, Flags::new() | Flags::AUR_ONLY);
-/// let actions = resolver.resolve_targets(&["discord-canary", "spotify"])?;
+/// let actions = resolver.resolve_targets(&["discord-canary", "spotify"]).await?;
 ///
 /// for install in &actions.install {
 ///     println!("install: {}", install.pkg.name())
@@ -151,7 +151,8 @@ pub struct Group<'a> {
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct Resolver<'a, 'b, H = raur::Handle> {
+pub struct Resolver<'a, 'b, H = raur::Handle> 
+{
     alpm: &'a Alpm,
     resolved: HashSet<String>,
     cache: &'b mut Cache,
@@ -165,10 +166,7 @@ pub struct Resolver<'a, 'b, H = raur::Handle> {
     is_devel: Option<IsDevel>,
 }
 
-impl<'a, 'b, H> Resolver<'a, 'b, H>
-where
-    H: Raur<Err = raur::Error>,
-{
+impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
     /// Create a new Resolver
     pub fn new(alpm: &'a Alpm, cache: &'b mut Cache, raur: &'b H, flags: Flags) -> Self {
         let actions = Actions {
@@ -242,7 +240,8 @@ where
     ///
     /// ```no_run
     /// # use aur_depends::{Error, AurUpdates};
-    /// # fn run() -> Result<(), Error> {
+    /// # #[tokio::test]
+    /// # async fn run() -> Result<(), Error> {
     /// use std::collections::HashSet;
     /// use alpm::Alpm;
     /// use raur::Handle;
@@ -254,7 +253,7 @@ where
     /// let mut cache = HashSet::new();
     /// let mut resolver = Resolver::new(&alpm, &mut cache, &raur, Flags::new() | Flags::AUR_ONLY);
     ///
-    /// let updates = resolver.aur_updates()?;
+    /// let updates = resolver.aur_updates().await?;
     ///
     /// for update in updates.updates {
     ///     println!("update: {}: {} -> {}", update.local.name(), update.local.version(),
@@ -263,7 +262,7 @@ where
     /// # Ok (())
     /// # }
     /// ```
-    pub fn aur_updates(&mut self) -> Result<AurUpdates<'a>, Error> {
+    pub async fn aur_updates(&mut self) -> Result<AurUpdates<'a>, Error> {
         let local_pkgs = self
             .alpm
             .localdb()
@@ -273,7 +272,7 @@ where
             .collect::<Vec<_>>();
 
         let local_pkg_names = local_pkgs.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
-        self.raur.cache_info(self.cache, &local_pkg_names)?;
+        self.raur.cache_info(self.cache, &local_pkg_names).await?;
         let mut missing = Vec::new();
         let mut ignored = Vec::new();
 
@@ -318,7 +317,7 @@ where
     }
 
     /// Resolve a list of targets.
-    pub fn resolve_targets<T: AsTarg>(mut self, pkgs: &[T]) -> Result<Actions<'a>, Error> {
+    pub async fn resolve_targets<T: AsTarg>(mut self, pkgs: &[T]) -> Result<Actions<'a>, Error> {
         let mut aur_targets = Vec::new();
         let mut repo_targets = Vec::new();
         let localdb = self.alpm.localdb();
@@ -370,7 +369,7 @@ where
             });
         }
 
-        self.cache_aur_pkgs_recursive(&aur_targets, true)?;
+        self.cache_aur_pkgs_recursive(&aur_targets, true).await?;
         self.resolved.clear();
 
         for (pkg, alpm_pkg) in repo_targets {
@@ -458,7 +457,7 @@ where
         Ok(self.actions)
     }
 
-    fn find_satisfier_aur_cache(&self, dep: &Dep) -> Option<&raur_ext::Package> {
+    fn find_satisfier_aur_cache(&self, dep: &Dep) -> Option<&ArcPackage> {
         if let Some(pkg) = self.cache.get(dep.name()) {
             if satisfies_aur_pkg(dep, pkg, self.flags.contains(Flags::NO_DEP_VERSION)) {
                 return Some(pkg);
@@ -477,7 +476,7 @@ where
         &self,
         dep: &Dep,
         target: bool,
-    ) -> Result<Option<&raur_ext::Package>, Error> {
+    ) -> Result<Option<&ArcPackage>, Error> {
         if let Some(ref f) = self.provider_callback {
             let mut pkgs = self
                 .cache
@@ -526,7 +525,7 @@ where
         }
     }
 
-    fn resolve_aur_pkg(&mut self, pkg: &raur_ext::Package) -> Result<(), Error> {
+    fn resolve_aur_pkg(&mut self, pkg: &ArcPackage) -> Result<(), Error> {
         if !self.flags.contains(Flags::NO_DEPS) {
             let check = if self.flags.contains(Flags::CHECK_DEPENDS) {
                 Some(&pkg.check_depends)
@@ -627,11 +626,11 @@ where
         Ok(())
     }
 
-    fn cache_aur_pkgs<S: AsRef<str>>(
+    async fn cache_aur_pkgs<S: AsRef<str>>(
         &mut self,
         pkgs: &[S],
         target: bool,
-    ) -> Result<Vec<raur_ext::Package>, Error> {
+    ) -> Result<Vec<ArcPackage>, Error> {
         let mut pkgs_nover = pkgs
             .iter()
             .map(|p| p.as_ref().split(is_ver_char).next().unwrap())
@@ -642,9 +641,9 @@ where
         if (!target && self.flags.contains(Flags::PROVIDES))
             || (target && self.flags.contains(Flags::TARGET_PROVIDES))
         {
-            self.cache_provides(&pkgs_nover)
+            self.cache_provides(&pkgs_nover).await
         } else {
-            let mut info = self.raur.cache_info(self.cache, &pkgs_nover)?;
+            let mut info = self.raur.cache_info(self.cache, &pkgs_nover).await?;
 
             if self.flags.contains(Flags::MISSING_PROVIDES) {
                 let missing = pkgs
@@ -660,7 +659,7 @@ where
 
                 if !missing.is_empty() {
                     debug!("attempting to find provides for missing: {:?}", missing);
-                    info.extend(self.cache_provides(&missing)?);
+                    info.extend(self.cache_provides(&missing).await?);
                 }
             }
 
@@ -675,10 +674,7 @@ where
         }
     }
 
-    fn cache_provides<S: AsRef<str>>(
-        &mut self,
-        pkgs: &[S],
-    ) -> Result<Vec<raur_ext::Package>, Error> {
+    async fn cache_provides<S: AsRef<str>>(&mut self, pkgs: &[S]) -> Result<Vec<ArcPackage>, Error> {
         let mut to_info = pkgs
             .iter()
             .map(|s| s.as_ref().to_string())
@@ -702,6 +698,7 @@ where
                     //TODO: async?
                     self.raur
                         .search_by(word, SearchBy::NameDesc)
+                        .await
                         .unwrap_or_else(|e| {
                             error!("provide search '{}' failed: {}", word, e);
                             Vec::new()
@@ -717,7 +714,7 @@ where
 
         debug!("trying to cache {:?}\n", to_info);
 
-        let mut ret = self.raur.cache_info(self.cache, &to_info)?;
+        let mut ret = self.raur.cache_info(self.cache, &to_info).await?;
 
         ret.retain(|pkg| {
             pkgs.iter().any(|dep| {
@@ -732,13 +729,27 @@ where
         Ok(ret)
     }
 
-    fn cache_aur_pkgs_recursive<S: AsRef<str>>(
+    async fn cache_aur_pkgs_recursive<S: AsRef<str>>(
         &mut self,
         pkgs: &[S],
         target: bool,
     ) -> Result<(), Error> {
+        let mut new_pkgs = self.cache_aur_pkgs_recursive2(pkgs, target).await?;
+
+        while !new_pkgs.is_empty() {
+            new_pkgs = self.cache_aur_pkgs_recursive2(&new_pkgs, false).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn cache_aur_pkgs_recursive2<S: AsRef<str>>(
+        &mut self,
+        pkgs: &[S],
+        target: bool,
+    ) -> Result<Vec<String>, Error> {
         if pkgs.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         if log_enabled!(Debug) {
@@ -748,9 +759,9 @@ where
             )
         }
 
-        let pkgs = self.cache_aur_pkgs(&pkgs, target)?;
+        let pkgs = self.cache_aur_pkgs(&pkgs, target).await?;
         if self.flags.contains(Flags::NO_DEPS) {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         let mut new_pkgs = Vec::new();
@@ -792,7 +803,7 @@ where
             }
         }
 
-        self.cache_aur_pkgs_recursive(&new_pkgs, false)
+        Ok(new_pkgs)
     }
 
     fn satisfied_build(&self, target: &Dep) -> bool {
@@ -969,7 +980,7 @@ mod tests {
         handle
     }
 
-    fn resolve(pkgs: &[&str], flags: Flags) -> TestActions {
+    async fn resolve(pkgs: &[&str], flags: Flags) -> TestActions {
         let raur = raur();
         let alpm = alpm();
         let mut cache = HashSet::new();
@@ -983,7 +994,7 @@ mod tests {
             }
         });
 
-        let actions = handle.resolve_targets(pkgs).unwrap();
+        let actions = handle.resolve_targets(pkgs).await.unwrap();
 
         let mut build = actions
             .build
@@ -1022,9 +1033,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_yay() {
-        let TestActions { install, build, .. } = resolve(&["yay"], Flags::new());
+    #[tokio::test]
+    async fn test_yay() {
+        let TestActions { install, build, .. } = resolve(&["yay"], Flags::new()).await;
 
         assert_eq!(build, vec!["yay-bin"]);
         assert_eq!(
@@ -1033,9 +1044,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_yay_needed() {
-        let TestActions { install, build, .. } = resolve(&["yay"], Flags::new() | Flags::NEEDED);
+    #[tokio::test]
+    async fn test_yay_needed() {
+        let TestActions { install, build, .. } = resolve(&["yay"], Flags::new() | Flags::NEEDED).await;
 
         assert_eq!(build, vec!["yay-bin"]);
         assert_eq!(
@@ -1044,63 +1055,63 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_yay_no_deps() {
-        let TestActions { install, build, .. } = resolve(&["yay"], Flags::new() | Flags::NO_DEPS);
+    #[tokio::test]
+    async fn test_yay_no_deps() {
+        let TestActions { install, build, .. } = resolve(&["yay"], Flags::new() | Flags::NO_DEPS).await;
 
         assert_eq!(build, vec!["yay-bin"]);
         assert_eq!(install, Vec::<String>::new());
     }
 
-    #[test]
-    fn test_aur_yay_no_deps() {
+    #[tokio::test]
+    async fn test_aur_yay_no_deps() {
         let TestActions { install, build, .. } =
-            resolve(&["aur/yay"], Flags::new() | Flags::NO_DEPS);
+            resolve(&["aur/yay"], Flags::new() | Flags::NO_DEPS).await;
 
         assert_eq!(build, vec!["yay-bin"]);
         assert_eq!(install, Vec::<String>::new());
     }
 
-    #[test]
-    fn test_core_yay_no_deps() {
+    #[tokio::test]
+    async fn test_core_yay_no_deps() {
         let TestActions { install, build, .. } =
-            resolve(&["core/yay"], Flags::new() | Flags::NO_DEPS);
+            resolve(&["core/yay"], Flags::new() | Flags::NO_DEPS).await;
 
         assert_eq!(build, Vec::<String>::new());
         assert_eq!(install, Vec::<String>::new());
     }
 
-    #[test]
-    fn test_core_glibc_no_deps() {
+    #[tokio::test]
+    async fn test_core_glibc_no_deps() {
         let TestActions { install, build, .. } =
-            resolve(&["core/glibc"], Flags::new() | Flags::NO_DEPS);
+            resolve(&["core/glibc"], Flags::new() | Flags::NO_DEPS).await;
 
         assert_eq!(build, Vec::<String>::new());
         assert_eq!(install, vec!["glibc"]);
     }
 
-    #[test]
-    fn test_aur_glibc_no_deps() {
+    #[tokio::test]
+    async fn test_aur_glibc_no_deps() {
         let TestActions { install, build, .. } =
-            resolve(&["core/yay"], Flags::new() | Flags::NO_DEPS);
+            resolve(&["core/yay"], Flags::new() | Flags::NO_DEPS).await;
 
         assert_eq!(build, Vec::<String>::new());
         assert_eq!(install, Vec::<String>::new());
     }
 
-    #[test]
-    fn test_extra_glibc_no_deps() {
+    #[tokio::test]
+    async fn test_extra_glibc_no_deps() {
         let TestActions { install, build, .. } =
-            resolve(&["core/yay"], Flags::new() | Flags::NO_DEPS);
+            resolve(&["core/yay"], Flags::new() | Flags::NO_DEPS).await;
 
         assert_eq!(build, Vec::<String>::new());
         assert_eq!(install, Vec::<String>::new());
     }
 
-    #[test]
-    fn test_yay_no_provides() {
+    #[tokio::test]
+    async fn test_yay_no_provides() {
         let TestActions { install, build, .. } =
-            resolve(&["yay"], Flags::new() & !Flags::TARGET_PROVIDES);
+            resolve(&["yay"], Flags::new() & !Flags::TARGET_PROVIDES).await;
 
         assert_eq!(build, vec!["yay"]);
         assert_eq!(
@@ -1109,30 +1120,30 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_make_only() {
+    #[tokio::test]
+    async fn test_make_only() {
         let TestActions { make, .. } = resolve(
             &["ros-melodic-desktop-full"],
             Flags::new() & !Flags::TARGET_PROVIDES & !Flags::MISSING_PROVIDES,
-        );
+        ).await;
         assert_eq!(make, 41);
     }
 
-    #[test]
-    fn test_cache_only() {
+    #[tokio::test]
+    async fn test_cache_only() {
         let raur = raur();
         let alpm = alpm();
         let mut cache = HashSet::new();
 
         let mut handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
         handle
-            .cache_aur_pkgs_recursive(&["ros-melodic-desktop-full"], true)
+            .cache_aur_pkgs_recursive(&["ros-melodic-desktop-full"], true).await
             .unwrap();
     }
 
-    #[test]
-    fn test_pacaur() {
-        let TestActions { install, build, .. } = resolve(&["pacaur"], Flags::new());
+    #[tokio::test]
+    async fn test_pacaur() {
+        let TestActions { install, build, .. } = resolve(&["pacaur"], Flags::new()).await;
         assert_eq!(build, vec!["auracle-git", "pacaur"]);
         assert_eq!(
             install,
@@ -1156,110 +1167,110 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_pacaur_needed() {
-        let TestActions { install, build, .. } = resolve(&["pacaur"], Flags::new() | Flags::NEEDED);
+    #[tokio::test]
+    async fn test_pacaur_needed() {
+        let TestActions { install, build, .. } = resolve(&["pacaur"], Flags::new() | Flags::NEEDED).await;
         assert_eq!(build, Vec::<String>::new());
         assert_eq!(install, Vec::<String>::new());
     }
 
-    #[test]
-    fn test_many() {
+    #[tokio::test]
+    async fn test_many() {
         let TestActions { install, build, .. } = resolve(
             &["yay", "pacaur", "pacman", "glibc", "0ad", "spotify"],
             Flags::new() | Flags::NO_DEPS,
-        );
+        ).await;
 
         assert_eq!(build, vec!["pacaur", "spotify", "yay-bin"]);
         assert_eq!(install, vec!["0ad", "glibc", "pacman"]);
     }
 
-    #[test]
-    fn test_many_needed() {
+    #[tokio::test]
+    async fn test_many_needed() {
         let TestActions { install, build, .. } = resolve(
             &["yay", "pacaur", "pacman", "glibc", "0ad", "spotify"],
             Flags::new() | Flags::NO_DEPS | Flags::NEEDED,
-        );
+        ).await;
 
         assert_eq!(build, vec!["spotify", "yay-bin"]);
         assert_eq!(install, vec!["0ad", "glibc"]);
     }
 
-    #[test]
-    fn test_a() {
-        let TestActions { missing, .. } = resolve(&["a"], Flags::new());
+    #[tokio::test]
+    async fn test_a() {
+        let TestActions { missing, .. } = resolve(&["a"], Flags::new()).await;
 
         assert_eq!(missing, vec![vec!["a", "b>1"]]);
     }
 
-    #[test]
-    fn test_a_no_ver() {
-        let TestActions { build, .. } = resolve(&["a"], Flags::new() | Flags::NO_DEP_VERSION);
+    #[tokio::test]
+    async fn test_a_no_ver() {
+        let TestActions { build, .. } = resolve(&["a"], Flags::new() | Flags::NO_DEP_VERSION).await;
 
         assert_eq!(build, vec!["a", "b"]);
     }
 
-    #[test]
-    fn test_discord() {
+    #[tokio::test]
+    async fn test_discord() {
         let TestActions {
             make,
             install,
             build,
             ..
-        } = resolve(&["discord-canary"], Flags::new());
+        } = resolve(&["discord-canary"], Flags::new()).await;
 
         assert_eq!(build.len(), 3);
         assert_eq!(install.len(), 89 + 13);
         assert_eq!(make, 11);
     }
 
-    #[test]
-    fn test_aur_only() {
+    #[tokio::test]
+    async fn test_aur_only() {
         let TestActions { build, install, .. } = resolve(
             &["xterm", "yay"],
             Flags::new() | Flags::NO_DEPS | Flags::AUR_ONLY,
-        );
+        ).await;
         assert_eq!(build, vec!["xterm", "yay-bin"]);
         assert_eq!(install, Vec::<String>::new());
 
         let TestActions { install, .. } =
-            resolve(&["pacman"], Flags::new() | Flags::NO_DEPS | Flags::AUR_ONLY);
+            resolve(&["pacman"], Flags::new() | Flags::NO_DEPS | Flags::AUR_ONLY).await;
         assert_eq!(install, Vec::<String>::new());
         //1assert_eq!(build, vec!["pacman-git"]);
     }
 
-    #[test]
-    fn test_repo_only() {
+    #[tokio::test]
+    async fn test_repo_only() {
         let TestActions { build, install, .. } = resolve(
             &["xterm", "yay"],
             Flags::new() | Flags::NO_DEPS | Flags::REPO_ONLY,
-        );
+        ).await;
         assert_eq!(install, vec!["xterm"]);
         assert_eq!(build, Vec::<String>::new());
 
         let TestActions { install, build, .. } = resolve(
             &["pacman"],
             Flags::new() | Flags::NO_DEPS | Flags::REPO_ONLY,
-        );
+        ).await;
         assert_eq!(install, vec!["pacman"]);
         assert_eq!(build, Vec::<String>::new());
     }
 
-    #[test]
-    fn test_dups() {
-        let TestActions { duplicates, .. } = resolve(&["extra/xterm", "aur/xterm"], Flags::new());
+    #[tokio::test]
+    async fn test_dups() {
+        let TestActions { duplicates, .. } = resolve(&["extra/xterm", "aur/xterm"], Flags::new()).await;
 
         assert_eq!(duplicates.len(), 1);
     }
 
-    #[test]
-    fn test_inner_conflicts() {
+    #[tokio::test]
+    async fn test_inner_conflicts() {
         let alpm = alpm();
         let raur = raur();
         let mut cache = HashSet::new();
         let handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
         let actions = handle
-            .resolve_targets(&["yay", "yay-git", "yay-bin"])
+            .resolve_targets(&["yay", "yay-git", "yay-bin"]).await
             .unwrap();
 
         let mut conflict1 = Conflict::new("yay".into());
@@ -1276,13 +1287,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_conflicts() {
+    #[tokio::test]
+    async fn test_conflicts() {
         let alpm = alpm();
         let raur = raur();
         let mut cache = HashSet::new();
         let handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
-        let actions = handle.resolve_targets(&["pacman-git"]).unwrap();
+        let actions = handle.resolve_targets(&["pacman-git"]).await.unwrap();
 
         let mut conflict = Conflict::new("pacman-git".into());
         conflict.push("pacman".into(), &Depend::new("pacman"));
@@ -1290,13 +1301,13 @@ mod tests {
         assert_eq!(actions.calculate_conflicts(), vec![conflict]);
     }
 
-    #[test]
-    fn test_aur_updates() {
+    #[tokio::test]
+    async fn test_aur_updates() {
         let alpm = alpm();
         let raur = raur();
         let mut cache = HashSet::new();
         let mut handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
-        let pkgs = handle.aur_updates().unwrap().updates;
+        let pkgs = handle.aur_updates().await.unwrap().updates;
         let pkgs = pkgs
             .iter()
             .map(|p| p.remote.name.as_str())
@@ -1305,8 +1316,8 @@ mod tests {
         assert_eq!(pkgs, vec!["version_newer"]);
     }
 
-    #[test]
-    fn test_aur_updates_enable_downgrade() {
+    #[tokio::test]
+    async fn test_aur_updates_enable_downgrade() {
         let alpm = alpm();
         let raur = raur();
         let mut cache = HashSet::new();
@@ -1316,7 +1327,7 @@ mod tests {
             &raur,
             Flags::new() | Flags::ENABLE_DOWNGRADE,
         );
-        let pkgs = handle.aur_updates().unwrap().updates;
+        let pkgs = handle.aur_updates().await.unwrap().updates;
         let pkgs = pkgs
             .iter()
             .map(|p| p.remote.name.as_str())
@@ -1325,19 +1336,19 @@ mod tests {
         assert_eq!(pkgs, vec!["pacaur", "version_newer", "version_older"]);
     }
 
-    #[test]
-    fn test_repo_nover() {
-        let TestActions { install, .. } = resolve(&["repo_version_test"], Flags::new());
+    #[tokio::test]
+    async fn test_repo_nover() {
+        let TestActions { install, .. } = resolve(&["repo_version_test"], Flags::new()).await;
         assert_eq!(install, Vec::<String>::new());
 
         let TestActions { install, .. } =
-            resolve(&["repo_version_test"], Flags::new() | Flags::NO_DEP_VERSION);
+            resolve(&["repo_version_test"], Flags::new() | Flags::NO_DEP_VERSION).await;
         assert_eq!(install, vec!["pacman-contrib"]);
     }
 
-    #[test]
-    fn test_satisfied_versioned_repo_dep() {
-        let TestActions { missing, .. } = resolve(&["satisfied_versioned_repo_dep"], Flags::new());
+    #[tokio::test]
+    async fn test_satisfied_versioned_repo_dep() {
+        let TestActions { missing, .. } = resolve(&["satisfied_versioned_repo_dep"], Flags::new()).await;
         assert_eq!(
             missing,
             vec![vec!["satisfied_versioned_repo_dep", "pacman>100"]]
@@ -1346,31 +1357,33 @@ mod tests {
         let TestActions { missing, .. } = resolve(
             &["satisfied_versioned_repo_dep"],
             Flags::new() | Flags::NO_DEP_VERSION,
-        );
+        ).await;
         assert_eq!(missing, Vec::<Vec<String>>::new());
     }
 
-    #[test]
-    fn test_satisfied_versioned_repo_dep_nover() {
-        let flags = Flags::new() & !Flags::TARGET_PROVIDES & !Flags::MISSING_PROVIDES;
-        let TestActions { build, install, .. } = resolve(&["satisfied_versioned_repo_dep"], flags);
+    #[tokio::test]
+    async fn test_satisfied_versioned_repo_dep_nover() {
+        let TestActions { build, install, .. } = resolve(
+            &["satisfied_versioned_repo_dep"],
+            Flags::new() | Flags::NO_DEP_VERSION,
+        ).await;
         assert_eq!(build, vec!["satisfied_versioned_repo_dep"]);
         assert!(install.is_empty());
 
         let TestActions { missing, .. } = resolve(
             &["satisfied_versioned_repo_dep"],
             Flags::new() | Flags::NO_DEP_VERSION,
-        );
+        ).await;
         assert_eq!(missing, Vec::<Vec<String>>::new());
     }
 
-    #[test]
-    fn test_cyclic() {
-        let TestActions { .. } = resolve(&["cyclic"], Flags::new());
+    #[tokio::test]
+    async fn test_cyclic() {
+        let TestActions { .. } = resolve(&["cyclic"], Flags::new()).await;
     }
 
-    #[test]
-    fn test_resolve_targets() {
+    #[tokio::test]
+    async fn test_resolve_targets() {
         let raur = raur();
         //let raur = raur::Handle::default();
         let alpm = alpm();
@@ -1383,7 +1396,7 @@ mod tests {
         });
 
         let actions = handle
-            .resolve_targets(&["ros-melodic-desktop-full"])
+            .resolve_targets(&["ros-melodic-desktop-full"]).await
             //.resolve_targets(&["yay", "yay-bin", "yay-git"])
             //.resolve_targets(&["yay", "pikaur", "pacman", "glibc", "0ad", "spotify"])
             //.resolve_targets(&["0ad"])

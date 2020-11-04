@@ -1,10 +1,11 @@
+use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
 use crate::Error;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
-use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
 use alpm::{Alpm, Dep, DepMod, Depend};
+use raur::ArcPackage;
 
 type ConflictMap = HashMap<String, Conflict>;
 
@@ -63,8 +64,8 @@ pub struct Package<T> {
     pub target: bool,
 }
 
-/// Wrapper around raur_ext::Package for extra metadata.
-pub type AurPackage = Package<raur_ext::Package>;
+/// Wrapper around ArcPackage for extra metadata.
+pub type AurPackage = Package<ArcPackage>;
 
 /// Wrapper around alpm::Package for extra metadata.
 pub type RepoPackage<'a> = Package<alpm::Package<'a>>;
@@ -155,7 +156,7 @@ pub struct AurUpdate<'a> {
     /// The local package.
     pub local: alpm::Package<'a>,
     /// The AUR package.
-    pub remote: raur_ext::Package,
+    pub remote: ArcPackage,
 }
 
 /// Collection of AUR updates and missing packages
