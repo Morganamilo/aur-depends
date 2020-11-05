@@ -231,6 +231,11 @@ where
         self
     }
 
+    /// Getter for the aur cache
+    pub fn cache(&mut self) -> &mut Cache {
+        self.cache
+    }
+
     /// Get which aur packages need to be updated.
     ///
     /// # Example
