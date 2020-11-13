@@ -390,6 +390,8 @@ where
             }
         }
 
+        debug!("Caching done, building tree");
+
         for aur_pkg in aur_targets {
             let dep = Depend::new(aur_pkg);
             let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, true)? {
@@ -563,7 +565,9 @@ where
                             "at time of failure pkgcache is: {:?}\n",
                             self.cache.iter().map(|p| &p.name).collect::<Vec<_>>()
                         );
+                        debug!("stack is: {:?}", self.stack);
                     }
+
                     self.actions.missing.push(Missing {
                         dep: dep.to_string(),
                         stack: self.stack.clone(),
@@ -757,18 +761,16 @@ where
 
                 if self.satisfied_local(&dep).unwrap()
                     || self.find_repo_satisfier_silent(&pkg).is_some()
-                    || (self.find_satisfier_aur_cache(&dep).is_some()
-                        || self.resolved.contains(&dep.to_string()))
+                    || self.resolved.contains(&dep.to_string())
                 {
                     if log_enabled!(Debug) {
                         debug!(
-                        "{} is satisfied so skipping: local={} repo={} aur_cache={} resolved={}",
-                        dep.to_string(),
-                        self.satisfied_local(&dep).unwrap(),
-                        self.find_repo_satisfier_silent(&pkg).is_some(),
-                        self.find_satisfier_aur_cache(&dep).is_some(),
-                        self.resolved.contains(&dep.to_string())
-                    );
+                            "{} is satisfied so skipping: local={} repo={} resolved={}",
+                            dep.to_string(),
+                            self.satisfied_local(&dep).unwrap(),
+                            self.find_repo_satisfier_silent(&pkg).is_some(),
+                            self.resolved.contains(&dep.to_string())
+                        );
                     }
 
                     continue;
