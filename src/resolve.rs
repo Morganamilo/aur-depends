@@ -371,6 +371,7 @@ where
         }
 
         self.cache_aur_pkgs_recursive(&aur_targets, true)?;
+        self.resolved.clear();
 
         for (pkg, alpm_pkg) in repo_targets {
             let mut up_to_date = false;
@@ -545,9 +546,12 @@ where
                 if self.satisfied_build(&dep)
                     || self.satisfied_local(&dep)?
                     || self.satisfied_install(&dep)
+                    || self.resolved.contains(&dep.to_string())
                 {
                     continue;
                 }
+
+                self.resolved.insert(dep.to_string());
 
                 if let Some(pkg) = self.find_repo_satisfier(dep.to_string()) {
                     self.stack.push(pkg.name().to_string());
@@ -735,6 +739,13 @@ where
     ) -> Result<(), Error> {
         if pkgs.is_empty() {
             return Ok(());
+        }
+
+        if log_enabled!(Debug) {
+            debug!(
+                "cache_aur_pkgs_recursive {:?}",
+                pkgs.iter().map(|p| p.as_ref()).collect::<Vec<_>>()
+            )
         }
 
         let pkgs = self.cache_aur_pkgs(&pkgs, target)?;
@@ -1341,10 +1352,8 @@ mod tests {
 
     #[test]
     fn test_satisfied_versioned_repo_dep_nover() {
-        let TestActions { build, install, .. } = resolve(
-            &["satisfied_versioned_repo_dep"],
-            Flags::new() | Flags::NO_DEP_VERSION,
-        );
+        let flags = Flags::new() & !Flags::TARGET_PROVIDES & !Flags::MISSING_PROVIDES;
+        let TestActions { build, install, .. } = resolve(&["satisfied_versioned_repo_dep"], flags);
         assert_eq!(build, vec!["satisfied_versioned_repo_dep"]);
         assert!(install.is_empty());
 
@@ -1353,6 +1362,11 @@ mod tests {
             Flags::new() | Flags::NO_DEP_VERSION,
         );
         assert_eq!(missing, Vec::<Vec<String>>::new());
+    }
+
+    #[test]
+    fn test_cyclic() {
+        let TestActions { .. } = resolve(&["cyclic"], Flags::new());
     }
 
     #[test]

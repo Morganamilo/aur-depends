@@ -3279,6 +3279,9 @@ pub fn raur() -> impl Raur<Err = raur::Error> {
     raur.pkg("version_newer").version("100-1");
     raur.pkg("version_older").version("0-1");
 
+    raur.pkg("cyclic-dep").depend("cyclic-dep");
+    raur.pkg("cyclic").depend("cyclic-dep");
+
     raur.pkg("xterm");
 
     raur
