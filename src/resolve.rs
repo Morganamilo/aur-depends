@@ -12,11 +12,11 @@ use alpm::{Alpm, Db, Dep, Depend, Version};
 use alpm_utils::{AsTarg, DbListExt};
 use log::Level::Debug;
 use log::{debug, error, log_enabled};
-use raur::{Cache, Raur, ArcPackage, SearchBy};
+use raur::{ArcPackage, Cache, Raur, SearchBy};
 
 bitflags! {
     /// Config options for Handle.
-    pub struct Flags: u16 {
+    pub struct Flags: u32 {
         /// Do not resolve dependencies.
         const NO_DEPS = 1 << 2;
         /// Do not enforse version constraints on dependencies.
@@ -41,6 +41,10 @@ bitflags! {
         const AUR_NAMESPACE = 1 << 13;
         /// when fetching updates, also include packages that are older than locally installed.
         const ENABLE_DOWNGRADE = 1 << 14;
+        /// Asume packages are going to be put in a local repo.
+        ///
+        /// This means that we need to still build packages even if they are already installed.
+        const LOCAL_REPO = 1 << 15;
     }
 }
 
@@ -151,8 +155,7 @@ pub struct Group<'a> {
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct Resolver<'a, 'b, H = raur::Handle> 
-{
+pub struct Resolver<'a, 'b, H = raur::Handle> {
     alpm: &'a Alpm,
     resolved: HashSet<String>,
     cache: &'b mut Cache,
@@ -313,6 +316,76 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             missing,
             ignored,
         };
+        Ok(updates)
+    }
+
+    /// Fetch updates from a list of local repos.
+    ///
+    /// The return will be a Vec of Aur Updates, where dbs[n] relates to aur_updates[n].
+    pub async fn local_aur_updates<S: AsRef<str>>(
+        &mut self,
+        repos: &[S],
+    ) -> Result<AurUpdates<'a>, Error> {
+        let mut dbs = self.alpm.syncdbs().to_list();
+        dbs.retain(|db| repos.iter().any(|repo| repo.as_ref() == db.name()));
+
+        let all_pkgs = dbs
+            .iter()
+            .flat_map(|db| db.pkgs())
+            .map(|p| p.name())
+            .collect::<Vec<_>>();
+        self.raur.cache_info(self.cache, &all_pkgs).await?;
+
+        let mut updates = Vec::new();
+        let mut seen = HashSet::new();
+        let mut missing = Vec::new();
+        let mut ignored = Vec::new();
+
+        for db in dbs {
+            let local_pkgs = db.pkgs();
+            let to_upgrade = local_pkgs
+                .into_iter()
+                .filter_map(|local_pkg| {
+                    if let Some(pkg) = self.cache.get(local_pkg.name()) {
+                        let should_upgrade = if self.flags.contains(Flags::ENABLE_DOWNGRADE) {
+                            Version::new(&*pkg.version) != local_pkg.version()
+                        } else {
+                            Version::new(&*pkg.version) > local_pkg.version()
+                        };
+
+                        if should_upgrade {
+                            let should_ignore = local_pkg.should_ignore();
+
+                            let up = AurUpdate {
+                                local: local_pkg,
+                                remote: pkg.clone(),
+                            };
+                            if should_ignore {
+                                ignored.push(up);
+                                return None;
+                            }
+
+                            return Some(up);
+                        }
+                    } else {
+                        missing.push(local_pkg);
+                    }
+
+                    None
+                })
+                .filter(|p| !seen.contains(p.local.name()))
+                .collect::<Vec<_>>();
+
+            seen.extend(to_upgrade.iter().map(|p| p.local.name()));
+            updates.extend(to_upgrade);
+        }
+
+        let updates = AurUpdates {
+            updates,
+            missing,
+            ignored,
+        };
+
         Ok(updates)
     }
 
@@ -543,7 +616,9 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 let dep = Depend::new(dep_str.to_string());
 
                 if self.satisfied_build(&dep)
-                    || self.satisfied_local(&dep)?
+                    || (!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep)?)
+                    || (self.flags.contains(Flags::LOCAL_REPO)
+                        && self.find_repo_satisfier_silent(dep.to_string()).is_some())
                     || self.satisfied_install(&dep)
                     || self.resolved.contains(&dep.to_string())
                 {
@@ -674,7 +749,10 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         }
     }
 
-    async fn cache_provides<S: AsRef<str>>(&mut self, pkgs: &[S]) -> Result<Vec<ArcPackage>, Error> {
+    async fn cache_provides<S: AsRef<str>>(
+        &mut self,
+        pkgs: &[S],
+    ) -> Result<Vec<ArcPackage>, Error> {
         let mut to_info = pkgs
             .iter()
             .map(|s| s.as_ref().to_string())
@@ -781,7 +859,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             for pkg in depends {
                 let dep = Depend::new(pkg.to_string());
 
-                if self.satisfied_local(&dep).unwrap()
+                if (!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep).unwrap())
                     || self.find_repo_satisfier_silent(&pkg).is_some()
                     || self.resolved.contains(&dep.to_string())
                 {
@@ -789,7 +867,8 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                         debug!(
                             "{} is satisfied so skipping: local={} repo={} resolved={}",
                             dep.to_string(),
-                            self.satisfied_local(&dep).unwrap(),
+                            self.flags.contains(Flags::LOCAL_REPO)
+                                && self.satisfied_local(&dep).unwrap(),
                             self.find_repo_satisfier_silent(&pkg).is_some(),
                             self.resolved.contains(&dep.to_string())
                         );
@@ -1046,7 +1125,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_yay_needed() {
-        let TestActions { install, build, .. } = resolve(&["yay"], Flags::new() | Flags::NEEDED).await;
+        let TestActions { install, build, .. } =
+            resolve(&["yay"], Flags::new() | Flags::NEEDED).await;
 
         assert_eq!(build, vec!["yay-bin"]);
         assert_eq!(
@@ -1057,7 +1137,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_yay_no_deps() {
-        let TestActions { install, build, .. } = resolve(&["yay"], Flags::new() | Flags::NO_DEPS).await;
+        let TestActions { install, build, .. } =
+            resolve(&["yay"], Flags::new() | Flags::NO_DEPS).await;
 
         assert_eq!(build, vec!["yay-bin"]);
         assert_eq!(install, Vec::<String>::new());
@@ -1125,7 +1206,8 @@ mod tests {
         let TestActions { make, .. } = resolve(
             &["ros-melodic-desktop-full"],
             Flags::new() & !Flags::TARGET_PROVIDES & !Flags::MISSING_PROVIDES,
-        ).await;
+        )
+        .await;
         assert_eq!(make, 41);
     }
 
@@ -1137,7 +1219,8 @@ mod tests {
 
         let mut handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
         handle
-            .cache_aur_pkgs_recursive(&["ros-melodic-desktop-full"], true).await
+            .cache_aur_pkgs_recursive(&["ros-melodic-desktop-full"], true)
+            .await
             .unwrap();
     }
 
@@ -1169,7 +1252,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_pacaur_needed() {
-        let TestActions { install, build, .. } = resolve(&["pacaur"], Flags::new() | Flags::NEEDED).await;
+        let TestActions { install, build, .. } =
+            resolve(&["pacaur"], Flags::new() | Flags::NEEDED).await;
         assert_eq!(build, Vec::<String>::new());
         assert_eq!(install, Vec::<String>::new());
     }
@@ -1179,7 +1263,8 @@ mod tests {
         let TestActions { install, build, .. } = resolve(
             &["yay", "pacaur", "pacman", "glibc", "0ad", "spotify"],
             Flags::new() | Flags::NO_DEPS,
-        ).await;
+        )
+        .await;
 
         assert_eq!(build, vec!["pacaur", "spotify", "yay-bin"]);
         assert_eq!(install, vec!["0ad", "glibc", "pacman"]);
@@ -1190,7 +1275,8 @@ mod tests {
         let TestActions { install, build, .. } = resolve(
             &["yay", "pacaur", "pacman", "glibc", "0ad", "spotify"],
             Flags::new() | Flags::NO_DEPS | Flags::NEEDED,
-        ).await;
+        )
+        .await;
 
         assert_eq!(build, vec!["spotify", "yay-bin"]);
         assert_eq!(install, vec!["0ad", "glibc"]);
@@ -1229,7 +1315,8 @@ mod tests {
         let TestActions { build, install, .. } = resolve(
             &["xterm", "yay"],
             Flags::new() | Flags::NO_DEPS | Flags::AUR_ONLY,
-        ).await;
+        )
+        .await;
         assert_eq!(build, vec!["xterm", "yay-bin"]);
         assert_eq!(install, Vec::<String>::new());
 
@@ -1244,21 +1331,24 @@ mod tests {
         let TestActions { build, install, .. } = resolve(
             &["xterm", "yay"],
             Flags::new() | Flags::NO_DEPS | Flags::REPO_ONLY,
-        ).await;
+        )
+        .await;
         assert_eq!(install, vec!["xterm"]);
         assert_eq!(build, Vec::<String>::new());
 
         let TestActions { install, build, .. } = resolve(
             &["pacman"],
             Flags::new() | Flags::NO_DEPS | Flags::REPO_ONLY,
-        ).await;
+        )
+        .await;
         assert_eq!(install, vec!["pacman"]);
         assert_eq!(build, Vec::<String>::new());
     }
 
     #[tokio::test]
     async fn test_dups() {
-        let TestActions { duplicates, .. } = resolve(&["extra/xterm", "aur/xterm"], Flags::new()).await;
+        let TestActions { duplicates, .. } =
+            resolve(&["extra/xterm", "aur/xterm"], Flags::new()).await;
 
         assert_eq!(duplicates.len(), 1);
     }
@@ -1270,7 +1360,8 @@ mod tests {
         let mut cache = HashSet::new();
         let handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
         let actions = handle
-            .resolve_targets(&["yay", "yay-git", "yay-bin"]).await
+            .resolve_targets(&["yay", "yay-git", "yay-bin"])
+            .await
             .unwrap();
 
         let mut conflict1 = Conflict::new("yay".into());
@@ -1348,7 +1439,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_satisfied_versioned_repo_dep() {
-        let TestActions { missing, .. } = resolve(&["satisfied_versioned_repo_dep"], Flags::new()).await;
+        let TestActions { missing, .. } =
+            resolve(&["satisfied_versioned_repo_dep"], Flags::new()).await;
         assert_eq!(
             missing,
             vec![vec!["satisfied_versioned_repo_dep", "pacman>100"]]
@@ -1357,7 +1449,8 @@ mod tests {
         let TestActions { missing, .. } = resolve(
             &["satisfied_versioned_repo_dep"],
             Flags::new() | Flags::NO_DEP_VERSION,
-        ).await;
+        )
+        .await;
         assert_eq!(missing, Vec::<Vec<String>>::new());
     }
 
@@ -1366,14 +1459,16 @@ mod tests {
         let TestActions { build, install, .. } = resolve(
             &["satisfied_versioned_repo_dep"],
             Flags::new() | Flags::NO_DEP_VERSION,
-        ).await;
+        )
+        .await;
         assert_eq!(build, vec!["satisfied_versioned_repo_dep"]);
         assert!(install.is_empty());
 
         let TestActions { missing, .. } = resolve(
             &["satisfied_versioned_repo_dep"],
             Flags::new() | Flags::NO_DEP_VERSION,
-        ).await;
+        )
+        .await;
         assert_eq!(missing, Vec::<Vec<String>>::new());
     }
 
@@ -1396,7 +1491,8 @@ mod tests {
         });
 
         let actions = handle
-            .resolve_targets(&["ros-melodic-desktop-full"]).await
+            .resolve_targets(&["ros-melodic-desktop-full"])
+            .await
             //.resolve_targets(&["yay", "yay-bin", "yay-git"])
             //.resolve_targets(&["yay", "pikaur", "pacman", "glibc", "0ad", "spotify"])
             //.resolve_targets(&["0ad"])
