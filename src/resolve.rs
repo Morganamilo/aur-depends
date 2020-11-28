@@ -618,7 +618,8 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 if self.satisfied_build(&dep)
                     || (!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep)?)
                     || (self.flags.contains(Flags::LOCAL_REPO)
-                        && self.find_repo_satisfier_silent(dep.to_string()).is_some())
+                        && self.find_repo_satisfier_silent(dep.to_string()).is_some()
+                        && self.satisfied_local(&dep)?)
                     || self.satisfied_install(&dep)
                     || self.resolved.contains(&dep.to_string())
                 {
@@ -859,7 +860,9 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             for pkg in depends {
                 let dep = Depend::new(pkg.to_string());
 
-                if (!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep).unwrap())
+                if (!self.flags.contains(Flags::LOCAL_REPO)
+                    && self.find_repo_satisfier_silent(dep.to_string()).is_some()
+                    && self.satisfied_local(&dep)?)
                     || self.find_repo_satisfier_silent(&pkg).is_some()
                     || self.resolved.contains(&dep.to_string())
                 {
