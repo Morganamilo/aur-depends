@@ -37,14 +37,12 @@ bitflags! {
         const AUR_ONLY = 1 << 11;
         /// Only search the repos for targets.
         const REPO_ONLY = 1 << 12;
-        /// Allow the use of `aur/foo` as meaning from the AUR, instead of a repo named `aur`.
-        const AUR_NAMESPACE = 1 << 13;
         /// when fetching updates, also include packages that are older than locally installed.
-        const ENABLE_DOWNGRADE = 1 << 14;
+        const ENABLE_DOWNGRADE = 1 << 13;
         /// Asume packages are going to be put in a local repo.
         ///
         /// This means that we need to still build packages even if they are already installed.
-        const LOCAL_REPO = 1 << 15;
+        const LOCAL_REPO = 1 << 14;
     }
 }
 
@@ -54,7 +52,6 @@ impl Flags {
         Flags::CALCULATE_MAKE
             | Flags::TARGET_PROVIDES
             | Flags::MISSING_PROVIDES
-            | Flags::AUR_NAMESPACE
             | Flags::CHECK_DEPENDS
     }
 }
@@ -167,6 +164,7 @@ pub struct Resolver<'a, 'b, H = raur::Handle> {
     provider_callback: Option<ProviderCallback>,
     group_callback: Option<GroupCallback<'a>>,
     is_devel: Option<IsDevel>,
+    aur_namespace: Option<String>,
 }
 
 impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
@@ -192,6 +190,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             provider_callback: None,
             group_callback: None,
             is_devel: None,
+            aur_namespace: None,
         }
     }
 
@@ -230,6 +229,16 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
     pub fn is_devel<F: Fn(&str) -> bool + 'static>(mut self, f: F) -> Self {
         self.is_devel = Some(IsDevel::new(f));
         self
+    }
+
+    /// Causes `aur/foo` as meaning from the AUR, instead of a repo named `aur`.
+    pub fn aur_namespace(&mut self) {
+        self.aur_namespace = Some("aur".to_string());
+    }
+
+    /// Causes `<name>/foo` as meaning from the AUR, instead of a repo named `<name>`.
+    pub fn custom_aur_namespace(&mut self, name: String) {
+        self.aur_namespace = Some(name);
     }
 
     /// Getter for the aur cache
@@ -320,8 +329,6 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
     }
 
     /// Fetch updates from a list of local repos.
-    ///
-    /// The return will be a Vec of Aur Updates, where dbs[n] relates to aur_updates[n].
     pub async fn local_aur_updates<S: AsRef<str>>(
         &mut self,
         repos: &[S],
@@ -397,7 +404,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
         for pkg in pkgs {
             let pkg = pkg.as_targ();
-            if pkg.repo == Some("aur") && self.flags.contains(Flags::AUR_NAMESPACE) {
+            if self.aur_namespace.is_some() &&  pkg.repo == self.aur_namespace.as_deref() {
                 aur_targets.push(pkg.pkg);
                 continue;
             }
