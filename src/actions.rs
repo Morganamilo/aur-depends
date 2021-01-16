@@ -1,5 +1,4 @@
 use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
-use crate::Error;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
@@ -191,6 +190,7 @@ impl<'a> Actions<'a> {
     fn check_reverse_conflict<S: AsRef<str>>(
         &self,
         name: S,
+        runtime: bool,
         conflict: &Dep,
         conflicts: &mut ConflictMap,
     ) {
@@ -198,6 +198,7 @@ impl<'a> Actions<'a> {
 
         self.install
             .iter()
+            .filter(|pkg| !runtime || !pkg.make)
             .map(|pkg| &pkg.pkg)
             .filter(|pkg| pkg.name() != name)
             .filter(|pkg| satisfies_repo_pkg(conflict, pkg, false))
@@ -209,6 +210,7 @@ impl<'a> Actions<'a> {
             });
 
         self.iter_build_pkgs()
+            .filter(|pkg| !runtime || !pkg.make)
             .map(|pkg| &pkg.pkg)
             .filter(|pkg| pkg.name != name)
             .filter(|pkg| satisfies_aur_pkg(conflict, pkg, false))
@@ -243,14 +245,22 @@ impl<'a> Actions<'a> {
             });
     }
 
-    fn check_forward_conflicts(&self, conflicts: &mut ConflictMap) {
+    fn check_forward_conflicts(&self, runtime: bool, conflicts: &mut ConflictMap) {
         for pkg in self.install.iter() {
+            if runtime && pkg.make {
+                continue;
+            }
+
             for conflict in pkg.pkg.conflicts() {
                 self.check_forward_conflict(pkg.pkg.name(), &conflict, conflicts);
             }
         }
 
         for pkg in self.iter_build_pkgs() {
+            if runtime && pkg.make {
+                continue;
+            }
+
             for conflict in &pkg.pkg.conflicts {
                 self.check_forward_conflict(
                     &pkg.pkg.name,
@@ -261,17 +271,26 @@ impl<'a> Actions<'a> {
         }
     }
 
-    fn check_inner_conflicts(&self, conflicts: &mut ConflictMap) {
+    fn check_inner_conflicts(&self, runtime: bool, conflicts: &mut ConflictMap) {
         for pkg in self.install.iter() {
+            if runtime && pkg.make {
+                continue;
+            }
+
             for conflict in pkg.pkg.conflicts() {
-                self.check_reverse_conflict(pkg.pkg.name(), &conflict, conflicts)
+                self.check_reverse_conflict(pkg.pkg.name(), runtime, &conflict, conflicts)
             }
         }
 
         for pkg in self.iter_build_pkgs() {
+            if runtime && pkg.make {
+                continue;
+            }
+
             for conflict in pkg.pkg.conflicts.iter() {
                 self.check_reverse_conflict(
                     &pkg.pkg.name,
+                    runtime,
                     &Depend::new(conflict.to_string()),
                     conflicts,
                 )
@@ -279,7 +298,7 @@ impl<'a> Actions<'a> {
         }
     }
 
-    fn check_reverse_conflicts(&self, conflicts: &mut ConflictMap) {
+    fn check_reverse_conflicts(&self, runtime: bool, conflicts: &mut ConflictMap) {
         self.alpm
             .localdb()
             .pkgs()
@@ -287,7 +306,7 @@ impl<'a> Actions<'a> {
             .filter(|pkg| !self.has_pkg(pkg.name()))
             .for_each(|pkg| {
                 pkg.conflicts().iter().for_each(|conflict| {
-                    self.check_reverse_conflict(pkg.name(), &conflict, conflicts)
+                    self.check_reverse_conflict(pkg.name(), runtime, &conflict, conflicts)
                 })
             });
     }
@@ -300,11 +319,13 @@ impl<'a> Actions<'a> {
     ///
     /// However other cases are more complex and can not be automatically resolved. So it is up to
     /// the user to decide how to handle these.
-    pub fn calculate_conflicts(&self) -> Vec<Conflict> {
+    ///
+    /// makedeps: if true, include make dependencies in the conflict calculation.
+    pub fn calculate_conflicts(&self, makedeps: bool) -> Vec<Conflict> {
         let mut conflicts = ConflictMap::new();
 
-        self.check_reverse_conflicts(&mut conflicts);
-        self.check_forward_conflicts(&mut conflicts);
+        self.check_reverse_conflicts(!makedeps, &mut conflicts);
+        self.check_forward_conflicts(!makedeps, &mut conflicts);
 
         let mut conflicts = conflicts
             .into_iter()
@@ -323,10 +344,12 @@ impl<'a> Actions<'a> {
     ///
     /// However other cases are more complex and can not be automatically resolved. So it is up to
     /// the user to decide how to handle these.
-    pub fn calculate_inner_conflicts(&self) -> Result<Vec<Conflict>, Error> {
+    ///
+    /// makedeps: if true, include make dependencies in the conflict calculation.
+    pub fn calculate_inner_conflicts(&self, makedeps: bool) -> Vec<Conflict> {
         let mut inner_conflicts = ConflictMap::new();
 
-        self.check_inner_conflicts(&mut inner_conflicts);
+        self.check_inner_conflicts(!makedeps, &mut inner_conflicts);
 
         let mut inner_conflicts = inner_conflicts
             .into_iter()
@@ -334,8 +357,7 @@ impl<'a> Actions<'a> {
             .collect::<Vec<Conflict>>();
 
         inner_conflicts.sort();
-
-        Ok(inner_conflicts)
+        inner_conflicts
     }
 
     /// Find duplicate targets. It is possible to have duplicate targets if packages with the same

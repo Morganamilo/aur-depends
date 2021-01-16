@@ -1383,7 +1383,7 @@ mod tests {
         conflict3.push("yay-bin".into(), &Depend::new("yay"));
 
         assert_eq!(
-            actions.calculate_inner_conflicts().unwrap(),
+            actions.calculate_inner_conflicts(true),
             vec![conflict1, conflict2, conflict3]
         );
     }
@@ -1399,7 +1399,7 @@ mod tests {
         let mut conflict = Conflict::new("pacman-git".into());
         conflict.push("pacman".into(), &Depend::new("pacman"));
 
-        assert_eq!(actions.calculate_conflicts(), vec![conflict]);
+        assert_eq!(actions.calculate_conflicts(true), vec![conflict]);
     }
 
     #[tokio::test]
@@ -1527,7 +1527,7 @@ mod tests {
             .iter()
             .for_each(|m| println!("missing {:?}", m));
 
-        actions.calculate_conflicts().iter().for_each(|c| {
+        actions.calculate_conflicts(true).iter().for_each(|c| {
             println!("c {}: ", c.pkg);
             c.conflicting
                 .iter()
@@ -1535,8 +1535,7 @@ mod tests {
         });
 
         actions
-            .calculate_inner_conflicts()
-            .unwrap()
+            .calculate_inner_conflicts(true)
             .iter()
             .for_each(|c| {
                 println!("c {}: ", c.pkg);
