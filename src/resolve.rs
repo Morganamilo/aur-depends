@@ -397,48 +397,75 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
     }
 
     /// Resolve a list of targets.
-    pub async fn resolve_targets<T: AsTarg>(mut self, pkgs: &[T]) -> Result<Actions<'a>, Error> {
+    pub async fn resolve_targets<T: AsTarg>(self, pkgs: &[T]) -> Result<Actions<'a>, Error> {
+        self.resolve(pkgs, &[], true).await
+    }
+
+    /// Resolve a list of dependencies.
+    pub async fn resolve_depends<T: AsRef<str>>(
+        self,
+        deps: &[T],
+        make_deps: &[T],
+    ) -> Result<Actions<'a>, Error> {
+        self.resolve(deps, make_deps, false).await
+    }
+
+    async fn resolve<T: AsTarg>(
+        mut self,
+        deps: &[T],
+        make_deps: &[T],
+        is_target: bool,
+    ) -> Result<Actions<'a>, Error> {
         let mut aur_targets = Vec::new();
         let mut repo_targets = Vec::new();
+        let make = make_deps
+            .iter()
+            .map(|t| t.as_targ().pkg)
+            .collect::<HashSet<&str>>();
         let localdb = self.alpm.localdb();
 
-        for pkg in pkgs {
+        for pkg in deps.iter().chain(make_deps) {
             let pkg = pkg.as_targ();
-            if self.aur_namespace.is_some() &&  pkg.repo == self.aur_namespace.as_deref() {
+            // TODO
+            // Not handle repo/pkg for !is_target
+
+            if self.aur_namespace.is_some() && pkg.repo == self.aur_namespace.as_deref() {
                 aur_targets.push(pkg.pkg);
                 continue;
             }
 
-            if !self.flags.contains(Flags::AUR_ONLY) {
+            if !self.flags.contains(Flags::AUR_ONLY) || !is_target {
                 if let Some(alpm_pkg) = self.find_repo_satisfier(pkg.pkg) {
                     repo_targets.push((pkg, alpm_pkg));
                     continue;
                 }
 
-                let groups = self
-                    .alpm
-                    .syncdbs()
-                    .iter()
-                    .filter(|db| pkg.repo.is_none() || pkg.repo.unwrap() == db.name())
-                    .filter_map(|db| db.group(pkg.pkg).map(|group| Group { db, group }).ok())
-                    .collect::<Vec<_>>();
-                if !groups.is_empty() {
-                    if let Some(ref f) = self.group_callback {
-                        for alpm_pkg in f.0(&groups) {
-                            repo_targets.push((pkg, alpm_pkg));
-                        }
-                    } else {
-                        for group in groups {
-                            for alpm_pkg in group.group.packages() {
+                if is_target {
+                    let groups = self
+                        .alpm
+                        .syncdbs()
+                        .iter()
+                        .filter(|db| pkg.repo.is_none() || pkg.repo.unwrap() == db.name())
+                        .filter_map(|db| db.group(pkg.pkg).map(|group| Group { db, group }).ok())
+                        .collect::<Vec<_>>();
+                    if !groups.is_empty() {
+                        if let Some(ref f) = self.group_callback {
+                            for alpm_pkg in f.0(&groups) {
                                 repo_targets.push((pkg, alpm_pkg));
                             }
+                        } else {
+                            for group in groups {
+                                for alpm_pkg in group.group.packages() {
+                                    repo_targets.push((pkg, alpm_pkg));
+                                }
+                            }
                         }
+                        continue;
                     }
-                    continue;
                 }
             }
 
-            if pkg.repo.is_none() && !self.flags.contains(Flags::REPO_ONLY) {
+            if pkg.repo.is_none() && (!self.flags.contains(Flags::REPO_ONLY) || !is_target) {
                 aur_targets.push(pkg.pkg);
                 continue;
             }
@@ -453,28 +480,29 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         self.resolved.clear();
 
         for (pkg, alpm_pkg) in repo_targets {
-            let mut up_to_date = false;
+            if !is_target && self.alpm.localdb().pkgs().find_satisfier(pkg.pkg).is_some() {
+                continue;
+            }
 
             if self.flags.contains(Flags::NEEDED) {
                 if let Ok(local) = localdb.pkg(alpm_pkg.name()) {
                     if local.version() >= alpm_pkg.version() {
-                        up_to_date = true;
                         let unneeded = Unneeded::new(pkg.to_string(), local.version().to_string());
                         self.actions.unneeded.push(unneeded);
+                        continue;
                     }
                 }
             }
 
-            if !up_to_date {
-                self.resolve_repo_pkg(alpm_pkg, true)?;
-            }
+            let is_make = make.contains(&pkg.pkg);
+            self.resolve_repo_pkg(alpm_pkg, is_target, is_make)?;
         }
 
         debug!("Caching done, building tree");
 
         for aur_pkg in aur_targets {
             let dep = Depend::new(aur_pkg);
-            let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, true)? {
+            let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, is_target)? {
                 pkg.clone()
             } else {
                 self.actions.missing.push(Missing {
@@ -484,9 +512,11 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 continue;
             };
 
-            let mut up_to_date = false;
+            if !is_target && self.alpm.localdb().pkgs().find_satisfier(aur_pkg).is_some() {
+                continue;
+            }
 
-            if self.flags.contains(Flags::NEEDED) {
+            if self.flags.contains(Flags::NEEDED) || !is_target {
                 let is_devel = self
                     .is_devel
                     .as_ref()
@@ -496,21 +526,18 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 if !is_devel {
                     if let Ok(local) = localdb.pkg(&*pkg.name) {
                         if local.version() >= Version::new(&*pkg.version) {
-                            up_to_date = true;
                             let unneeded =
                                 Unneeded::new(aur_pkg.to_string(), local.version().to_string());
                             self.actions.unneeded.push(unneeded);
+                            continue;
                         }
                     }
                 }
             }
 
-            if up_to_date {
-                continue;
-            }
-
+            let is_make = make.contains(&aur_pkg);
             self.stack.push(aur_pkg.to_string());
-            self.resolve_aur_pkg(&pkg)?;
+            self.resolve_aur_pkg(&pkg, is_target, is_make)?;
             self.stack.pop().unwrap();
 
             if self
@@ -605,7 +632,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         }
     }
 
-    fn resolve_aur_pkg(&mut self, pkg: &ArcPackage) -> Result<(), Error> {
+    fn resolve_aur_pkg(&mut self, pkg: &ArcPackage, target: bool, make: bool) -> Result<(), Error> {
         if !self.flags.contains(Flags::NO_DEPS) {
             let check = if self.flags.contains(Flags::CHECK_DEPENDS) {
                 Some(&pkg.check_depends)
@@ -637,7 +664,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
                 if let Some(pkg) = self.find_repo_satisfier(dep.to_string()) {
                     self.stack.push(pkg.name().to_string());
-                    self.resolve_repo_pkg(pkg, false)?;
+                    self.resolve_repo_pkg(pkg, false, true)?;
                     self.stack.pop().unwrap();
                     continue;
                 }
@@ -662,13 +689,13 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 };
 
                 self.stack.push(dep_str.to_string());
-                self.resolve_aur_pkg(&pkg)?;
+                self.resolve_aur_pkg(&pkg, false, true)?;
                 self.stack.pop();
 
                 let p = AurPackage {
                     pkg: pkg.clone(),
-                    make: true,
-                    target: false,
+                    make: make,
+                    target: target,
                 };
 
                 self.push_build(&pkg.package_base, p);
@@ -678,7 +705,12 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         Ok(())
     }
 
-    fn resolve_repo_pkg(&mut self, pkg: alpm::Package<'a>, target: bool) -> Result<(), Error> {
+    fn resolve_repo_pkg(
+        &mut self,
+        pkg: alpm::Package<'a>,
+        target: bool,
+        make: bool,
+    ) -> Result<(), Error> {
         if !self.seen.insert(pkg.name().to_string()) {
             return Ok(());
         }
@@ -690,7 +722,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 }
 
                 if let Some(pkg) = self.find_repo_satisfier(dep.to_string()) {
-                    self.resolve_repo_pkg(pkg, false)?;
+                    self.resolve_repo_pkg(pkg, false, true)?;
                 } else {
                     self.actions.missing.push(Missing {
                         dep: dep.to_string(),
@@ -702,7 +734,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
         self.actions.install.push(RepoPackage {
             pkg,
-            make: !target,
+            make: make,
             target,
         });
 
@@ -838,12 +870,13 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             return Ok(Vec::new());
         }
 
-        if log_enabled!(Debug) {
+        // Compilier Bug?
+        /*if log_enabled!(Debug) {
             debug!(
                 "cache_aur_pkgs_recursive {:?}",
                 pkgs.iter().map(|p| p.as_ref()).collect::<Vec<_>>()
             )
-        }
+        }*/
 
         let pkgs = self.cache_aur_pkgs(&pkgs, target).await?;
         if self.flags.contains(Flags::NO_DEPS) {
