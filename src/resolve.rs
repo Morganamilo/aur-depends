@@ -6,6 +6,7 @@ use crate::Error;
 use bitflags::bitflags;
 
 use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt;
 
 use alpm::{Alpm, Db, Dep, Depend, Version};
@@ -537,7 +538,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
             let is_make = make.contains(&aur_pkg);
             self.stack.push(aur_pkg.to_string());
-            self.resolve_aur_pkg(&pkg, is_target, is_make)?;
+            self.resolve_aur_pkg_deps(&pkg, is_make)?;
             self.stack.pop().unwrap();
 
             if self
@@ -632,7 +633,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         }
     }
 
-    fn resolve_aur_pkg(&mut self, pkg: &ArcPackage, target: bool, make: bool) -> Result<(), Error> {
+    fn resolve_aur_pkg_deps(&mut self, pkg: &ArcPackage, make: bool) -> Result<(), Error> {
         if !self.flags.contains(Flags::NO_DEPS) {
             let check = if self.flags.contains(Flags::CHECK_DEPENDS) {
                 Some(&pkg.check_depends)
@@ -669,7 +670,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                     continue;
                 }
 
-                let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false)? {
+                let sat_pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false)? {
                     pkg.clone()
                 } else {
                     debug!("failed to find '{}' in aur cache", dep.to_string(),);
@@ -689,16 +690,16 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 };
 
                 self.stack.push(dep_str.to_string());
-                self.resolve_aur_pkg(&pkg, false, true)?;
+                self.resolve_aur_pkg_deps(&sat_pkg, true)?;
                 self.stack.pop();
 
                 let p = AurPackage {
-                    pkg: pkg.clone(),
-                    make: make,
-                    target: target,
+                    pkg: sat_pkg.clone(),
+                    make,
+                    target: false,
                 };
 
-                self.push_build(&pkg.package_base, p);
+                self.push_build(&sat_pkg.package_base, p);
             }
         }
 
@@ -1593,5 +1594,37 @@ mod tests {
         );
 
         println!("install: {}", actions.install.len());
+    }
+
+    #[tokio::test]
+    async fn test_target_flags() {
+
+        let raur = raur();
+        let alpm = alpm();
+        let mut cache = HashSet::new();
+        let handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
+        let actions = handle
+            .resolve_targets(&["discord-canary"])
+            .await
+            .unwrap();
+
+        let mut target_flags: HashMap<String, bool> = HashMap::new();
+
+        target_flags.insert("discord-canary".to_string(), true);
+        target_flags.insert("libc++".to_string(), false);
+        target_flags.insert("libc++abi".to_string(), false);
+
+        actions
+            .build
+            .iter()
+            .flat_map(|b| &b.pkgs)
+            .for_each(|p| println!("build (aur) {} T:{}", p.pkg.name, p.target));
+
+        for pkg in actions.build.iter().flat_map(|b| &b.pkgs) {
+            println!("pkg: {}, expected: {}, target: {}",
+                     pkg.pkg.name, target_flags[&pkg.pkg.name], pkg.target);
+            assert_eq!(target_flags[&pkg.pkg.name], pkg.target);
+        }
+
     }
 }
