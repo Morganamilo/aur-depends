@@ -6,7 +6,6 @@ use crate::Error;
 use bitflags::bitflags;
 
 use std::collections::HashSet;
-use std::collections::HashMap;
 use std::fmt;
 
 use alpm::{Alpm, Db, Dep, Depend, Version};
@@ -1081,6 +1080,7 @@ mod tests {
         missing: Vec<Vec<String>>,
         make: usize,
         duplicates: Vec<String>,
+        targets: Vec<String>,
     }
 
     fn _init_logger() {
@@ -1143,6 +1143,13 @@ mod tests {
                 .filter(|i| i.make)
                 .count();
 
+        let targets = actions
+            .build.iter()
+            .flat_map(|base| &base.pkgs)
+            .filter(|pkg| pkg.target)
+            .map(|pkg| pkg.pkg.name.to_string())
+            .collect::<Vec<_>>();
+
         TestActions {
             duplicates: actions.duplicate_targets(),
             install,
@@ -1153,6 +1160,7 @@ mod tests {
                 .map(|m| m.stack.into_iter().chain(Some(m.dep)).collect())
                 .collect(),
             make,
+            targets,
         }
     }
 
@@ -1598,33 +1606,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_target_flags() {
-
-        let raur = raur();
-        let alpm = alpm();
-        let mut cache = HashSet::new();
-        let handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
-        let actions = handle
-            .resolve_targets(&["discord-canary"])
-            .await
-            .unwrap();
-
-        let mut target_flags: HashMap<String, bool> = HashMap::new();
-
-        target_flags.insert("discord-canary".to_string(), true);
-        target_flags.insert("libc++".to_string(), false);
-        target_flags.insert("libc++abi".to_string(), false);
-
-        actions
-            .build
-            .iter()
-            .flat_map(|b| &b.pkgs)
-            .for_each(|p| println!("build (aur) {} T:{}", p.pkg.name, p.target));
-
-        for pkg in actions.build.iter().flat_map(|b| &b.pkgs) {
-            println!("pkg: {}, expected: {}, target: {}",
-                     pkg.pkg.name, target_flags[&pkg.pkg.name], pkg.target);
-            assert_eq!(target_flags[&pkg.pkg.name], pkg.target);
-        }
-
+        let TestActions { targets, .. } = resolve(&["discord-canary"], Flags::new()).await;
+        assert_eq!(targets, vec!["discord-canary"]);
     }
 }
