@@ -416,6 +416,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         make_deps: &[T],
         is_target: bool,
     ) -> Result<Actions<'a>, Error> {
+
         let mut aur_targets = Vec::new();
         let mut repo_targets = Vec::new();
         let make = make_deps
@@ -475,6 +476,9 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 stack: Vec::new(),
             });
         }
+
+
+        dbg!(&aur_targets);
 
         self.cache_aur_pkgs_recursive(&aur_targets, true).await?;
         self.resolved.clear();
@@ -1107,7 +1111,7 @@ mod tests {
         let alpm = alpm();
         let mut cache = HashSet::new();
 
-        let handle = Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|_, pkgs| {
+        let mut handle = Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|_, pkgs| {
             debug!("provider choice: {:?}", pkgs);
             if let Some(i) = pkgs.iter().position(|pkg| *pkg == "yay-bin") {
                 i
@@ -1116,6 +1120,7 @@ mod tests {
             }
         });
 
+        handle.aur_namespace();
         let actions = handle.resolve_targets(pkgs).await.unwrap();
 
         let mut build = actions
@@ -1157,13 +1162,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_yay() {
-        let TestActions { install, build, .. } = resolve(&["yay"], Flags::new()).await;
+        let TestActions { install, build, make, .. } = resolve(&["yay"], Flags::new()).await;
 
         assert_eq!(build, vec!["yay-bin"]);
         assert_eq!(
             install,
             vec!["git", "go", "perl-error", "perl-mailtools", "perl-timedate"]
         );
+        assert_eq!(make, 1);
     }
 
     #[tokio::test]
@@ -1251,7 +1257,7 @@ mod tests {
             Flags::new() & !Flags::TARGET_PROVIDES & !Flags::MISSING_PROVIDES,
         )
         .await;
-        assert_eq!(make, 41);
+        assert_eq!(make, 40);
     }
 
     #[tokio::test]
@@ -1348,9 +1354,12 @@ mod tests {
             ..
         } = resolve(&["discord-canary"], Flags::new()).await;
 
+        println!("{:?}", build);
+        println!("{:?}", install);
+
         assert_eq!(build.len(), 3);
         assert_eq!(install.len(), 89 + 13);
-        assert_eq!(make, 11);
+        assert_eq!(make, 9);
     }
 
     #[tokio::test]
@@ -1390,9 +1399,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_dups() {
-        let TestActions { duplicates, .. } =
+        let TestActions { build, install, duplicates, .. } =
             resolve(&["extra/xterm", "aur/xterm"], Flags::new()).await;
 
+        println!("{:#?}", install);
+        println!("{:#?}", build);
         assert_eq!(duplicates.len(), 1);
     }
 
