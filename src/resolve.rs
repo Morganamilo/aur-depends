@@ -477,9 +477,6 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             });
         }
 
-
-        dbg!(&aur_targets);
-
         self.cache_aur_pkgs_recursive(&aur_targets, true).await?;
         self.resolved.clear();
 
