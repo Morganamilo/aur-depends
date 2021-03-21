@@ -538,7 +538,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
             let is_make = make.contains(&aur_pkg);
             self.stack.push(aur_pkg.to_string());
-            self.resolve_aur_pkg(&pkg, is_target, is_make)?;
+            self.resolve_aur_pkg_deps(&pkg, is_make)?;
             self.stack.pop().unwrap();
 
             if self
@@ -633,7 +633,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         }
     }
 
-    fn resolve_aur_pkg(&mut self, pkg: &ArcPackage, target: bool, make: bool) -> Result<(), Error> {
+    fn resolve_aur_pkg_deps(&mut self, pkg: &ArcPackage, make: bool) -> Result<(), Error> {
         if !self.flags.contains(Flags::NO_DEPS) {
             let check = if self.flags.contains(Flags::CHECK_DEPENDS) {
                 Some(&pkg.check_depends)
@@ -670,7 +670,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                     continue;
                 }
 
-                let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false)? {
+                let sat_pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false)? {
                     pkg.clone()
                 } else {
                     debug!("failed to find '{}' in aur cache", dep.to_string(),);
@@ -690,16 +690,16 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 };
 
                 self.stack.push(dep_str.to_string());
-                self.resolve_aur_pkg(&pkg, false, true)?;
+                self.resolve_aur_pkg_deps(&sat_pkg, true)?;
                 self.stack.pop();
 
                 let p = AurPackage {
-                    pkg: pkg.clone(),
-                    make: make,
-                    target: target,
+                    pkg: sat_pkg.clone(),
+                    make,
+                    target: false,
                 };
 
-                self.push_build(&pkg.package_base, p);
+                self.push_build(&sat_pkg.package_base, p);
             }
         }
 
@@ -1081,6 +1081,7 @@ mod tests {
         missing: Vec<Vec<String>>,
         make: usize,
         duplicates: Vec<String>,
+        targets: Vec<String>,
     }
 
     fn _init_logger() {
@@ -1144,6 +1145,13 @@ mod tests {
                 .filter(|i| i.make)
                 .count();
 
+        let targets = actions
+            .build.iter()
+            .flat_map(|base| &base.pkgs)
+            .filter(|pkg| pkg.target)
+            .map(|pkg| pkg.pkg.name.to_string())
+            .collect::<Vec<_>>();
+
         TestActions {
             duplicates: actions.duplicate_targets(),
             install,
@@ -1154,6 +1162,7 @@ mod tests {
                 .map(|m| m.stack.into_iter().chain(Some(m.dep)).collect())
                 .collect(),
             make,
+            targets,
         }
     }
 
@@ -1601,5 +1610,11 @@ mod tests {
         );
 
         println!("install: {}", actions.install.len());
+    }
+
+    #[tokio::test]
+    async fn test_target_flags() {
+        let TestActions { targets, .. } = resolve(&["discord-canary"], Flags::new()).await;
+        assert_eq!(targets, vec!["discord-canary"]);
     }
 }
