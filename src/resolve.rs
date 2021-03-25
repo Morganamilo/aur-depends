@@ -503,7 +503,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
         for aur_pkg in aur_targets {
             let dep = Depend::new(aur_pkg);
-            let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, is_target)? {
+            let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, is_target) {
                 pkg.clone()
             } else {
                 self.actions.missing.push(Missing {
@@ -584,7 +584,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         &self,
         dep: &Dep,
         target: bool,
-    ) -> Result<Option<&ArcPackage>, Error> {
+    ) -> Option<&ArcPackage> {
         if let Some(ref f) = self.provider_callback {
             let mut pkgs = self
                 .cache
@@ -600,20 +600,20 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             if !target {
                 if let Some(pkg) = pkgs.iter().find(|&&p| p == dep.name()) {
                     debug!("picked from cache: {}", pkg);
-                    return Ok(self.cache.get(*pkg));
+                    return self.cache.get(*pkg);
                 }
             }
 
             if pkgs.len() == 1 {
-                return Ok(self.cache.get(pkgs[0]));
+                return self.cache.get(pkgs[0]);
             } else if pkgs.is_empty() {
-                return Ok(None);
+                return None;
             }
 
             if !target {
                 for &pkg in &pkgs {
                     if self.alpm.localdb().pkg(pkg).is_ok() {
-                        return Ok(self.cache.get(pkg));
+                        return self.cache.get(pkg);
                     }
                 }
             }
@@ -626,10 +626,10 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
             let choice = f.0(dep.to_string().as_str(), &pkgs);
             debug!("choice was: {}={}", choice, pkgs[choice]);
-            Ok(self.cache.get(pkgs[choice]))
+            self.cache.get(pkgs[choice])
         } else {
             debug!("no provider callback");
-            Ok(self.find_satisfier_aur_cache(dep))
+            self.find_satisfier_aur_cache(dep)
         }
     }
 
@@ -651,10 +651,10 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 let dep = Depend::new(dep_str.to_string());
 
                 if self.satisfied_build(&dep)
-                    || (!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep)?)
+                    || (!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep))
                     || (self.flags.contains(Flags::LOCAL_REPO)
                         && self.find_repo_satisfier_silent(dep.to_string()).is_some()
-                        && self.satisfied_local(&dep)?)
+                        && self.satisfied_local(&dep))
                     || self.satisfied_install(&dep)
                     || self.resolved.contains(&dep.to_string())
                 {
@@ -670,7 +670,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                     continue;
                 }
 
-                let sat_pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false)? {
+                let sat_pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false) {
                     pkg.clone()
                 } else {
                     debug!("failed to find '{}' in aur cache", dep.to_string(),);
@@ -718,7 +718,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
         if !self.flags.contains(Flags::NO_DEPS) {
             for dep in pkg.depends() {
-                if self.satisfied_install(&dep) || self.satisfied_local(&dep)? {
+                if self.satisfied_install(&dep) || self.satisfied_local(&dep) {
                     continue;
                 }
 
@@ -735,7 +735,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
         self.actions.install.push(RepoPackage {
             pkg,
-            make: make,
+            make,
             target,
         });
 
@@ -903,7 +903,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
                 if (!self.flags.contains(Flags::LOCAL_REPO)
                     && self.find_repo_satisfier_silent(dep.to_string()).is_some()
-                    && self.satisfied_local(&dep)?)
+                    && self.satisfied_local(&dep))
                     || self.find_repo_satisfier_silent(&pkg).is_some()
                     || self.resolved.contains(&dep.to_string())
                 {
@@ -912,7 +912,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                             "{} is satisfied so skipping: local={} repo={} resolved={}",
                             dep.to_string(),
                             self.flags.contains(Flags::LOCAL_REPO)
-                                && self.satisfied_local(&dep).unwrap(),
+                                && self.satisfied_local(&dep),
                             self.find_repo_satisfier_silent(&pkg).is_some(),
                             self.resolved.contains(&dep.to_string())
                         );
@@ -953,23 +953,23 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         })
     }
 
-    fn satisfied_local(&self, target: &Dep) -> Result<bool, Error> {
+    fn satisfied_local(&self, target: &Dep) -> bool {
         if let Ok(pkg) = self.alpm.localdb().pkg(target.name()) {
             if satisfies_repo_pkg(target, &pkg, self.flags.contains(Flags::NO_DEP_VERSION)) {
-                return Ok(true);
+                return true;
             }
         }
 
         if self.flags.contains(Flags::NO_DEP_VERSION) {
             let ret = self.alpm.localdb().pkgs().find_satisfier(target.name());
-            Ok(ret.is_some())
+            ret.is_some()
         } else {
             let ret = self
                 .alpm
                 .localdb()
                 .pkgs()
                 .find_satisfier(target.to_string());
-            Ok(ret.is_some())
+            ret.is_some()
         }
     }
 
