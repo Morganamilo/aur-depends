@@ -23,3 +23,11 @@ pub fn satisfies<D: AsDep, S: AsRef<str>, V: AsRef<Ver>>(
         depends::satisfies(dep, name, version, provides)
     }
 }
+
+pub fn satisfies_provide(dep: &Dep, provide: &Dep, nover: bool) -> bool {
+    if nover {
+        depends::satisfies_provide_nover(dep, provide)
+    } else {
+        depends::satisfies_provide(dep, provide)
+    }
+}

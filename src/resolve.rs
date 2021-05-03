@@ -1,7 +1,7 @@
 use crate::actions::{
     Actions, AurPackage, AurUpdate, AurUpdates, Base, Missing, RepoPackage, Unneeded,
 };
-use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
+use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg, satisfies_provide};
 use crate::Error;
 use bitflags::bitflags;
 
@@ -430,6 +430,11 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             // TODO
             // Not handle repo/pkg for !is_target
 
+            let dep = Depend::new(pkg.to_string());
+            if !is_target && self.assume_installed(&dep) {
+                continue;
+            }
+
             if self.aur_namespace.is_some() && pkg.repo == self.aur_namespace.as_deref() {
                 aur_targets.push(pkg.pkg);
                 continue;
@@ -481,7 +486,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         self.resolved.clear();
 
         for (pkg, alpm_pkg) in repo_targets {
-            if !is_target && self.alpm.localdb().pkgs().find_satisfier(pkg.pkg).is_some() {
+            if !is_target && localdb.pkgs().find_satisfier(pkg.pkg).is_some() {
                 continue;
             }
 
@@ -503,6 +508,10 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
         for aur_pkg in aur_targets {
             let dep = Depend::new(aur_pkg);
+            if self.assume_installed(&dep) {
+                continue;
+            }
+
             let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, is_target) {
                 pkg.clone()
             } else {
@@ -657,6 +666,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                         && self.satisfied_local(&dep))
                     || self.satisfied_install(&dep)
                     || self.resolved.contains(&dep.to_string())
+                    || self.assume_installed(&dep)
                 {
                     continue;
                 }
@@ -718,7 +728,10 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
         if !self.flags.contains(Flags::NO_DEPS) {
             for dep in pkg.depends() {
-                if self.satisfied_install(&dep) || self.satisfied_local(&dep) {
+                if self.satisfied_install(&dep)
+                    || self.satisfied_local(&dep)
+                    || self.assume_installed(&dep)
+                {
                     continue;
                 }
 
@@ -906,6 +919,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                     && self.satisfied_local(&dep))
                     || self.find_repo_satisfier_silent(&pkg).is_some()
                     || self.resolved.contains(&dep.to_string())
+                    || self.assume_installed(&dep)
                 {
                     if log_enabled!(Debug) {
                         debug!(
@@ -1056,6 +1070,11 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 }
             }
         }
+    }
+
+    fn assume_installed(&self, dep: &Dep) -> bool {
+        let nover = self.flags.contains(Flags::NO_DEP_VERSION) ;
+        self.alpm.assume_installed().iter().any(|assume| satisfies_provide(dep, &assume, nover))
     }
 }
 
