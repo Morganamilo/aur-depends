@@ -1,7 +1,7 @@
 use crate::actions::{
     Actions, AurPackage, AurUpdate, AurUpdates, Base, Missing, RepoPackage, Unneeded,
 };
-use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg, satisfies_provide};
+use crate::satisfies::{satisfies_aur_pkg, satisfies_provide, satisfies_repo_pkg};
 use crate::Error;
 use bitflags::bitflags;
 
@@ -416,7 +416,6 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         make_deps: &[T],
         is_target: bool,
     ) -> Result<Actions<'a>, Error> {
-
         let mut aur_targets = Vec::new();
         let mut repo_targets = Vec::new();
         let make = make_deps
@@ -589,11 +588,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
     /// Expected behaviour
     /// pull in a list of all matches, if one is installed, default to it.
     /// unless we are looking for a target, then always show all options.
-    fn select_satisfier_aur_cache(
-        &self,
-        dep: &Dep,
-        target: bool,
-    ) -> Option<&ArcPackage> {
+    fn select_satisfier_aur_cache(&self, dep: &Dep, target: bool) -> Option<&ArcPackage> {
         if let Some(ref f) = self.provider_callback {
             let mut pkgs = self
                 .cache
@@ -746,11 +741,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             }
         }
 
-        self.actions.install.push(RepoPackage {
-            pkg,
-            make,
-            target,
-        });
+        self.actions.install.push(RepoPackage { pkg, make, target });
 
         Ok(())
     }
@@ -925,8 +916,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                         debug!(
                             "{} is satisfied so skipping: local={} repo={} resolved={}",
                             dep.to_string(),
-                            self.flags.contains(Flags::LOCAL_REPO)
-                                && self.satisfied_local(&dep),
+                            self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep),
                             self.find_repo_satisfier_silent(&pkg).is_some(),
                             self.resolved.contains(&dep.to_string())
                         );
@@ -1073,8 +1063,11 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
     }
 
     fn assume_installed(&self, dep: &Dep) -> bool {
-        let nover = self.flags.contains(Flags::NO_DEP_VERSION) ;
-        self.alpm.assume_installed().iter().any(|assume| satisfies_provide(dep, &assume, nover))
+        let nover = self.flags.contains(Flags::NO_DEP_VERSION);
+        self.alpm
+            .assume_installed()
+            .iter()
+            .any(|assume| satisfies_provide(dep, &assume, nover))
     }
 }
 
@@ -1128,14 +1121,15 @@ mod tests {
         let alpm = alpm();
         let mut cache = HashSet::new();
 
-        let mut handle = Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|_, pkgs| {
-            debug!("provider choice: {:?}", pkgs);
-            if let Some(i) = pkgs.iter().position(|pkg| *pkg == "yay-bin") {
-                i
-            } else {
-                0
-            }
-        });
+        let mut handle =
+            Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|_, pkgs| {
+                debug!("provider choice: {:?}", pkgs);
+                if let Some(i) = pkgs.iter().position(|pkg| *pkg == "yay-bin") {
+                    i
+                } else {
+                    0
+                }
+            });
 
         handle.aur_namespace();
         let actions = handle.resolve_targets(pkgs).await.unwrap();
@@ -1165,7 +1159,8 @@ mod tests {
                 .count();
 
         let targets = actions
-            .build.iter()
+            .build
+            .iter()
             .flat_map(|base| &base.pkgs)
             .filter(|pkg| pkg.target)
             .map(|pkg| pkg.pkg.name.to_string())
@@ -1187,7 +1182,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_yay() {
-        let TestActions { install, build, make, .. } = resolve(&["yay"], Flags::new()).await;
+        let TestActions {
+            install,
+            build,
+            make,
+            ..
+        } = resolve(&["yay"], Flags::new()).await;
 
         assert_eq!(build, vec!["yay-bin"]);
         assert_eq!(
@@ -1424,8 +1424,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_dups() {
-        let TestActions { build, install, duplicates, .. } =
-            resolve(&["extra/xterm", "aur/xterm"], Flags::new()).await;
+        let TestActions {
+            build,
+            install,
+            duplicates,
+            ..
+        } = resolve(&["extra/xterm", "aur/xterm"], Flags::new()).await;
 
         println!("{:#?}", install);
         println!("{:#?}", build);
