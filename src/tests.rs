@@ -3278,6 +3278,14 @@ pub fn raur() -> impl Raur {
         .make_depend("meson")
         .conflict("pacman");
 
+    raur.pkg("assume-test")
+        .depend("assume-dep1")
+        .depend("assume-dep2")
+        .depend("i3-wm")
+        .depend("libev");
+    raur.pkg("assume-dep1");
+    raur.pkg("assume-dep2");
+
     raur.pkg("repo_version_test").depend("pacman-contrib>100");
     raur.pkg("satisfied_versioned_repo_dep")
         .depend("pacman>100");
