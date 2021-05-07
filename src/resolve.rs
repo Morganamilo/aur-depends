@@ -1108,14 +1108,13 @@ mod tests {
 
     fn alpm() -> Alpm {
         //let handle = Alpm::new("/", "/var/lib/pacman/").unwrap();
-        let handle = Alpm::new("/", "tests/db").unwrap();
-        // let mut handle = handle;
+        let mut handle = Alpm::new("/", "tests/db").unwrap();
         handle.register_syncdb("core", SigLevel::NONE).unwrap();
         handle.register_syncdb("extra", SigLevel::NONE).unwrap();
         handle.register_syncdb("community", SigLevel::NONE).unwrap();
         handle.register_syncdb("multilib", SigLevel::NONE).unwrap();
-        //handle.add_assume_installed(&Depend::new("assume-dep1")).unwrap();
-        //handle.add_assume_installed(&Depend::new("i3-wm")).unwrap();
+        handle.add_assume_installed(&Depend::new("assume-dep1")).unwrap();
+        handle.add_assume_installed(&Depend::new("i3-wm")).unwrap();
         handle
     }
 
@@ -1327,7 +1326,6 @@ mod tests {
         );
     }
 
-    #[ignore]
     #[tokio::test]
     async fn test_assume() {
         let TestActions { install, build, .. } = resolve(&["assume-test"], Flags::new()).await;
