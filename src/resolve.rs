@@ -1,8 +1,7 @@
-use crate::actions::{
-    Actions, AurPackage, AurUpdate, AurUpdates, Base, Missing, RepoPackage, Unneeded,
-};
 use crate::satisfies::{satisfies_aur_pkg, satisfies_provide, satisfies_repo_pkg};
-use crate::Error;
+use crate::{
+    Actions, AurPackage, AurUpdate, AurUpdates, Base, Error, Missing, RepoPackage, Unneeded,
+};
 use bitflags::bitflags;
 
 use std::collections::HashSet;
@@ -12,12 +11,12 @@ use alpm::{Alpm, Db, Dep, Depend, Version};
 use alpm_utils::{AsTarg, DbListExt};
 use log::Level::Debug;
 use log::{debug, log_enabled};
-use raur::{ArcPackage, Cache, SearchBy};
 use maybe_async::maybe_async;
-#[cfg(feature = "async")]
-use raur::Raur;
 #[cfg(feature = "blocking")]
 use raur::blocking::Raur;
+#[cfg(feature = "async")]
+use raur::Raur;
+use raur::{ArcPackage, Cache, SearchBy};
 
 bitflags! {
     /// Config options for Handle.
@@ -172,7 +171,7 @@ pub struct Resolver<'a, 'b, H> {
     aur_namespace: Option<String>,
 }
 
-impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
+impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
     /// Create a new Resolver
     pub fn new(alpm: &'a Alpm, cache: &'b mut Cache, raur: &'b H, flags: Flags) -> Self {
         let actions = Actions {
@@ -284,7 +283,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
     /// # }
     /// ```
     #[maybe_async]
-    pub async fn aur_updates(&mut self) -> Result<AurUpdates<'a>, Error> {
+    pub async fn aur_updates(&mut self) -> Result<AurUpdates<'a>, Error<H::Err>> {
         let local_pkgs = self
             .alpm
             .localdb()
@@ -294,7 +293,10 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
             .collect::<Vec<_>>();
 
         let local_pkg_names = local_pkgs.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
-        self.raur.cache_info(self.cache, &local_pkg_names).await?;
+        self.raur
+            .cache_info(self.cache, &local_pkg_names)
+            .await
+            .map_err(Error::Raur)?;
         let mut missing = Vec::new();
         let mut ignored = Vec::new();
 
@@ -343,7 +345,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
     pub async fn local_aur_updates<S: AsRef<str>>(
         &mut self,
         repos: &[S],
-    ) -> Result<AurUpdates<'a>, Error> {
+    ) -> Result<AurUpdates<'a>, Error<H::Err>> {
         let mut dbs = self.alpm.syncdbs().to_list_mut();
         dbs.retain(|db| repos.iter().any(|repo| repo.as_ref() == db.name()));
 
@@ -352,7 +354,10 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
             .flat_map(|db| db.pkgs())
             .map(|p| p.name())
             .collect::<Vec<_>>();
-        self.raur.cache_info(self.cache, &all_pkgs).await?;
+        self.raur
+            .cache_info(self.cache, &all_pkgs)
+            .await
+            .map_err(Error::Raur)?;
 
         let mut updates = Vec::new();
         let mut seen = HashSet::new();
@@ -409,7 +414,10 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
 
     /// Resolve a list of targets.
     #[maybe_async]
-    pub async fn resolve_targets<T: AsTarg>(self, pkgs: &[T]) -> Result<Actions<'a>, Error> {
+    pub async fn resolve_targets<T: AsTarg>(
+        self,
+        pkgs: &[T],
+    ) -> Result<Actions<'a>, Error<H::Err>> {
         self.resolve(pkgs, &[], true).await
     }
 
@@ -419,7 +427,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         self,
         deps: &[T],
         make_deps: &[T],
-    ) -> Result<Actions<'a>, Error> {
+    ) -> Result<Actions<'a>, Error<H::Err>> {
         self.resolve(deps, make_deps, false).await
     }
 
@@ -429,7 +437,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         deps: &[T],
         make_deps: &[T],
         is_target: bool,
-    ) -> Result<Actions<'a>, Error> {
+    ) -> Result<Actions<'a>, Error<H::Err>> {
         let mut aur_targets = Vec::new();
         let mut repo_targets = Vec::new();
         let make = make_deps
@@ -659,7 +667,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         targs: &[&str],
         pkg: &ArcPackage,
         make: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error<H::Err>> {
         if !self.flags.contains(Flags::NO_DEPS) {
             let check = if self.flags.contains(Flags::CHECK_DEPENDS) {
                 Some(&pkg.check_depends)
@@ -746,7 +754,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         pkg: alpm::Package<'a>,
         target: bool,
         make: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error<H::Err>> {
         if !self.seen.insert(pkg.name().to_string()) {
             return Ok(());
         }
@@ -782,7 +790,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         &mut self,
         pkgs: &[S],
         target: bool,
-    ) -> Result<Vec<ArcPackage>, Error> {
+    ) -> Result<Vec<ArcPackage>, Error<H::Err>> {
         let mut pkgs_nover = pkgs
             .iter()
             .map(|p| p.as_ref().split(is_ver_char).next().unwrap())
@@ -795,7 +803,11 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         {
             self.cache_provides(&pkgs_nover).await
         } else {
-            let mut info = self.raur.cache_info(self.cache, &pkgs_nover).await?;
+            let mut info = self
+                .raur
+                .cache_info(self.cache, &pkgs_nover)
+                .await
+                .map_err(Error::Raur)?;
 
             if self.flags.contains(Flags::MISSING_PROVIDES) {
                 let missing = pkgs
@@ -830,7 +842,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
     async fn cache_provides<S: AsRef<str>>(
         &mut self,
         pkgs: &[S],
-    ) -> Result<Vec<ArcPackage>, Error> {
+    ) -> Result<Vec<ArcPackage>, Error<H::Err>> {
         let mut to_info = pkgs
             .iter()
             .map(|s| s.as_ref().to_string())
@@ -855,8 +867,8 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
                     self.raur
                         .search_by(word, SearchBy::NameDesc)
                         .await
-                        .unwrap_or_else(|e| {
-                            debug!("provide search '{}' failed: {}", word, e);
+                        .unwrap_or_else(|_| {
+                            debug!("provide search '{}' failed", word);
                             Vec::new()
                         })
                         .into_iter()
@@ -870,7 +882,11 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
 
         debug!("trying to cache {:?}\n", to_info);
 
-        let mut ret = self.raur.cache_info(self.cache, &to_info).await?;
+        let mut ret = self
+            .raur
+            .cache_info(self.cache, &to_info)
+            .await
+            .map_err(Error::Raur)?;
 
         ret.retain(|pkg| {
             pkgs.iter().any(|dep| {
@@ -890,7 +906,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         &mut self,
         pkgs: &[S],
         target: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error<H::Err>> {
         let mut new_pkgs = self.cache_aur_pkgs_recursive2(pkgs, target).await?;
 
         while !new_pkgs.is_empty() {
@@ -905,7 +921,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         &mut self,
         pkgs: &[S],
         target: bool,
-    ) -> Result<Vec<String>, Error> {
+    ) -> Result<Vec<String>, Error<H::Err>> {
         if pkgs.is_empty() {
             return Ok(Vec::new());
         }

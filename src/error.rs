@@ -1,33 +1,27 @@
-use std::fmt::{self, Display};
+use std::fmt::{self, Debug, Display};
 
 /// The error type for aur-depends.
 #[derive(Debug)]
-pub enum Error {
+pub enum Error<E> {
     /// An error occurred in the alpm crate.
     Alpm(alpm::Error),
     /// An error occurred in the rua crate.
-    Raur(raur::Error),
+    Raur(E),
 }
 
-impl From<alpm::Error> for Error {
-    fn from(e: alpm::Error) -> Error {
+impl<E> From<alpm::Error> for Error<E> {
+    fn from(e: alpm::Error) -> Error<E> {
         Error::Alpm(e)
     }
 }
 
-impl From<raur::Error> for Error {
-    fn from(e: raur::Error) -> Error {
-        Error::Raur(e)
-    }
-}
-
-impl Display for Error {
+impl<E: Display> Display for Error<E> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::Alpm(e) => e.fmt(fmt),
-            Error::Raur(e) => e.fmt(fmt),
+            Error::Alpm(e) => Display::fmt(&e, fmt),
+            Error::Raur(e) => Display::fmt(&e, fmt),
         }
     }
 }
 
-impl std::error::Error for Error {}
+impl<E: Display + Debug> std::error::Error for Error<E> {}
