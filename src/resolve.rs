@@ -167,7 +167,7 @@ pub struct Resolver<'a, 'b, H = raur::Handle> {
     aur_namespace: Option<String>,
 }
 
-impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
+impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
     /// Create a new Resolver
     pub fn new(alpm: &'a Alpm, cache: &'b mut Cache, raur: &'b H, flags: Flags) -> Self {
         let actions = Actions {

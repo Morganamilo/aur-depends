@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use raur::{Error, Package, Raur, SearchBy};
+use raur::{Package, Raur, SearchBy};
 
 pub struct MockRaur {
     pub pkgs: HashMap<String, Package>,
@@ -9,11 +9,13 @@ pub struct MockRaur {
 
 #[async_trait]
 impl Raur for MockRaur {
+    type Err = raur::Error;
+
     async fn search_by<S: AsRef<str> + Send + Sync>(
         &self,
         query: S,
         _by: SearchBy,
-    ) -> Result<Vec<Package>, Error> {
+    ) -> Result<Vec<Package>, Self::Err> {
         Ok(self
             .pkgs
             .values()
@@ -32,7 +34,7 @@ impl Raur for MockRaur {
     async fn raw_info<S: AsRef<str> + Send + Sync>(
         &self,
         pkg_names: &[S],
-    ) -> Result<Vec<Package>, Error> {
+    ) -> Result<Vec<Package>, Self::Err> {
         let mut out = Vec::new();
 
         for name in pkg_names {
@@ -115,7 +117,7 @@ impl<'a> MockPackage<'a> {
     }
 }
 
-pub fn raur() -> impl Raur {
+pub fn raur() -> impl Raur<Err=raur::Error> {
     let mut raur = MockRaur::new();
     raur.pkg("a").depend("b>1");
     raur.pkg("b").version("1");
