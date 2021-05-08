@@ -16,8 +16,9 @@ exclude = ["tests"]
 alpm = "2.0.5"
 alpm-utils = "1.0.0"
 log = "0.4.14"
-raur = "5.0.1"
+raur = { version = "5.0.1", default-features = false, git = "https://gitlab.com/davidbittner/raur/" }
 bitflags = "1.2.1"
+maybe-async = "0.2.4"
 
 [dev-dependencies]
 async-trait = "0.1.50"
@@ -25,6 +26,9 @@ simplelog = "0.10.0"
 tokio = { version = "1.7.1", features = ["macros", "rt"] }
 
 [features]
+default = ["async", "native-tls"]
 git = ["alpm/git", "alpm-utils/git"]
-rustls = ["raur/rustls"]
-default = ["raur/default"]
+rust-tls = ["raur/rust-tls"]
+native-tls = ["raur/native-tls"]
+async = ["raur/async"]
+blocking = ["maybe-async/is_sync", "raur/blocking"]

@@ -12,7 +12,12 @@ use alpm::{Alpm, Db, Dep, Depend, Version};
 use alpm_utils::{AsTarg, DbListExt};
 use log::Level::Debug;
 use log::{debug, log_enabled};
-use raur::{ArcPackage, Cache, Raur, SearchBy};
+use raur::{ArcPackage, Cache, SearchBy};
+use maybe_async::maybe_async;
+#[cfg(feature = "async")]
+use raur::Raur;
+#[cfg(feature = "blocking")]
+use raur::blocking::Raur;
 
 bitflags! {
     /// Config options for Handle.
@@ -152,7 +157,7 @@ pub struct Group<'a> {
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct Resolver<'a, 'b, H = raur::Handle> {
+pub struct Resolver<'a, 'b, H> {
     alpm: &'a Alpm,
     resolved: HashSet<String>,
     cache: &'b mut Cache,
@@ -278,6 +283,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
     /// # Ok (())
     /// # }
     /// ```
+    #[maybe_async]
     pub async fn aur_updates(&mut self) -> Result<AurUpdates<'a>, Error> {
         let local_pkgs = self
             .alpm
@@ -333,6 +339,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
     }
 
     /// Fetch updates from a list of local repos.
+    #[maybe_async]
     pub async fn local_aur_updates<S: AsRef<str>>(
         &mut self,
         repos: &[S],
@@ -401,11 +408,13 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
     }
 
     /// Resolve a list of targets.
+    #[maybe_async]
     pub async fn resolve_targets<T: AsTarg>(self, pkgs: &[T]) -> Result<Actions<'a>, Error> {
         self.resolve(pkgs, &[], true).await
     }
 
     /// Resolve a list of dependencies.
+    #[maybe_async]
     pub async fn resolve_depends<T: AsRef<str>>(
         self,
         deps: &[T],
@@ -414,6 +423,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         self.resolve(deps, make_deps, false).await
     }
 
+    #[maybe_async]
     async fn resolve<T: AsTarg>(
         mut self,
         deps: &[T],
@@ -767,6 +777,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         Ok(())
     }
 
+    #[maybe_async]
     async fn cache_aur_pkgs<S: AsRef<str>>(
         &mut self,
         pkgs: &[S],
@@ -815,6 +826,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         }
     }
 
+    #[maybe_async]
     async fn cache_provides<S: AsRef<str>>(
         &mut self,
         pkgs: &[S],
@@ -873,6 +885,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         Ok(ret)
     }
 
+    #[maybe_async]
     async fn cache_aur_pkgs_recursive<S: AsRef<str>>(
         &mut self,
         pkgs: &[S],
@@ -887,6 +900,7 @@ impl<'a, 'b, H: Raur<Err = raur::Error> + Sync> Resolver<'a, 'b, H> {
         Ok(())
     }
 
+    #[maybe_async]
     async fn cache_aur_pkgs_recursive2<S: AsRef<str>>(
         &mut self,
         pkgs: &[S],
