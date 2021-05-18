@@ -560,7 +560,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             let p = AurPackage {
                 pkg: pkg.clone(),
                 make: false,
-                target: true,
+                target: is_target,
             };
 
             self.push_build(&pkg.package_base, p);
