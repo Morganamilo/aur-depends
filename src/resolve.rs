@@ -1085,7 +1085,7 @@ mod tests {
     use crate::tests::*;
     use crate::Conflict;
     use alpm::SigLevel;
-    use simplelog::{ConfigBuilder, LevelFilter, TermLogger, TerminalMode};
+    use simplelog::{ConfigBuilder, LevelFilter, TermLogger, TerminalMode, ColorChoice};
 
     struct TestActions {
         build: Vec<String>,
@@ -1103,6 +1103,7 @@ mod tests {
                 .add_filter_allow_str("aur_depends")
                 .build(),
             TerminalMode::Stderr,
+            ColorChoice::Never,
         );
     }
 
