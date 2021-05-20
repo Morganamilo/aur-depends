@@ -333,7 +333,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         &mut self,
         repos: &[S],
     ) -> Result<AurUpdates<'a>, Error> {
-        let mut dbs = self.alpm.syncdbs().to_list();
+        let mut dbs = self.alpm.syncdbs().to_list_mut();
         dbs.retain(|db| repos.iter().any(|repo| repo.as_ref() == db.name()));
 
         let all_pkgs = dbs
@@ -988,10 +988,9 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
     }
 
     fn find_repo_satisfier_silent<S: AsRef<str>>(&self, target: S) -> Option<alpm::Package<'a>> {
-        let cb = self.alpm.question_cb();
-        self.alpm.set_question_cb(alpm::QuestionCb::none());
+        let cb = self.alpm.take_raw_question_cb();
         let pkg = self.find_repo_satisfier(target);
-        self.alpm.set_question_cb(cb);
+        self.alpm.set_raw_question_cb(cb);
         pkg
     }
 
@@ -1008,7 +1007,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
     }
 
     fn calculate_make(&mut self) {
-        let mut runtime = HashSet::new();
+        let mut runtime = Vec::new();
         let mut run = true;
         let no_dep_ver = self.flags.contains(Flags::NO_DEP_VERSION);
 
@@ -1023,6 +1022,9 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             .flat_map(|b| &b.pkgs)
             .filter(|p| !p.make)
             .for_each(|p| runtime.extend(p.pkg.depends.iter().map(|d| Depend::new(d.as_str()))));
+
+        runtime.sort_unstable_by_key(|a| a.to_string());
+        runtime.dedup_by_key(|a| a.to_string());
 
         while run {
             run = false;
@@ -1085,7 +1087,7 @@ mod tests {
     use crate::tests::*;
     use crate::Conflict;
     use alpm::SigLevel;
-    use simplelog::{ConfigBuilder, LevelFilter, TermLogger, TerminalMode, ColorChoice};
+    use simplelog::{ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode};
 
     struct TestActions {
         build: Vec<String>,
@@ -1114,7 +1116,9 @@ mod tests {
         handle.register_syncdb("extra", SigLevel::NONE).unwrap();
         handle.register_syncdb("community", SigLevel::NONE).unwrap();
         handle.register_syncdb("multilib", SigLevel::NONE).unwrap();
-        handle.add_assume_installed(&Depend::new("assume-dep1")).unwrap();
+        handle
+            .add_assume_installed(&Depend::new("assume-dep1"))
+            .unwrap();
         handle.add_assume_installed(&Depend::new("i3-wm")).unwrap();
         handle
     }
