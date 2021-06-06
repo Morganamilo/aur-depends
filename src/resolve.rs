@@ -11,7 +11,7 @@ use std::fmt;
 use alpm::{Alpm, Db, Dep, Depend, Version};
 use alpm_utils::{AsTarg, DbListExt};
 use log::Level::Debug;
-use log::{debug, error, log_enabled};
+use log::{debug, log_enabled};
 use raur::{ArcPackage, Cache, Raur, SearchBy};
 
 bitflags! {
@@ -823,7 +823,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                         .search_by(word, SearchBy::NameDesc)
                         .await
                         .unwrap_or_else(|e| {
-                            error!("provide search '{}' failed: {}", word, e);
+                            debug!("provide search '{}' failed: {}", word, e);
                             Vec::new()
                         })
                         .into_iter()
