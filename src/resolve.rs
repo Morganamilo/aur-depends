@@ -507,7 +507,14 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
         for aur_pkg in aur_targets {
             let dep = Depend::new(aur_pkg);
-            if self.assume_installed(&dep) {
+
+            if !is_target
+                && ((!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep))
+                    || (self.flags.contains(Flags::LOCAL_REPO)
+                        && self.find_repo_satisfier_silent(dep.to_string()).is_some()
+                        && self.satisfied_local(&dep))
+                    || self.assume_installed(&dep))
+            {
                 continue;
             }
 
@@ -520,10 +527,6 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 });
                 continue;
             };
-
-            if !is_target && self.alpm.localdb().pkgs().find_satisfier(aur_pkg).is_some() {
-                continue;
-            }
 
             if self.flags.contains(Flags::NEEDED) || !is_target {
                 let is_devel = self
