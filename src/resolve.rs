@@ -226,19 +226,23 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
     /// Devel packages are never skipped when using NEEDED.
     ///
     /// By default, no packages are considered devel.
-    pub fn is_devel<F: Fn(&str) -> bool + 'static>(mut self, f: F) -> Self {
+    pub fn devel_pkgs<F: Fn(&str) -> bool + 'static>(mut self, f: F) -> Self {
         self.is_devel = Some(IsDevel::new(f));
         self
     }
 
-    /// Causes `aur/foo` as meaning from the AUR, instead of a repo named `aur`.
-    pub fn aur_namespace(&mut self) {
-        self.aur_namespace = Some("aur".to_string());
+    /// If enabled, causes `aur/foo` to mean from the AUR, instead of a repo named `aur`.
+    pub fn aur_namespace(mut self, enable: bool) -> Self {
+        if enable {
+            self.aur_namespace = Some("aur".to_string());
+        }
+        self
     }
 
-    /// Causes `<name>/foo` as meaning from the AUR, instead of a repo named `<name>`.
-    pub fn custom_aur_namespace(&mut self, name: String) {
-        self.aur_namespace = Some(name);
+    /// Causes `<name>/foo` to mean from the AUR, instead of a repo named `<name>`.
+    pub fn custom_aur_namespace(mut self, name: Option<String>) -> Self {
+        self.aur_namespace = name;
+        self
     }
 
     /// Getter for the aur cache
@@ -668,13 +672,14 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
                 let is_aur_targ = self.dep_is_aur_targ(targs, &dep);
 
-                if !is_aur_targ && ((!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep))
-                    || (self.flags.contains(Flags::LOCAL_REPO)
-                        && self.find_repo_satisfier_silent(dep.to_string()).is_some()
-                        && self.satisfied_local(&dep))
-                    || self.satisfied_install(&dep)
-                    || self.resolved.contains(&dep.to_string())
-                    || self.assume_installed(&dep))
+                if !is_aur_targ
+                    && ((!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep))
+                        || (self.flags.contains(Flags::LOCAL_REPO)
+                            && self.find_repo_satisfier_silent(dep.to_string()).is_some()
+                            && self.satisfied_local(&dep))
+                        || self.satisfied_install(&dep)
+                        || self.resolved.contains(&dep.to_string())
+                        || self.assume_installed(&dep))
                 {
                     continue;
                 }
@@ -1160,8 +1165,9 @@ mod tests {
         let alpm = alpm();
         let mut cache = HashSet::new();
 
-        let mut handle =
-            Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|_, pkgs| {
+        let handle = Resolver::new(&alpm, &mut cache, &raur, flags)
+            .aur_namespace(true)
+            .provider_callback(|_, pkgs| {
                 debug!("provider choice: {:?}", pkgs);
                 if let Some(i) = pkgs.iter().position(|pkg| *pkg == "yay-bin") {
                     i
@@ -1170,7 +1176,6 @@ mod tests {
                 }
             });
 
-        handle.aur_namespace();
         let actions = handle.resolve_targets(pkgs).await.unwrap();
 
         let mut build = actions
