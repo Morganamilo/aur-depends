@@ -13,7 +13,7 @@ keywords = ["archlinux", "pkgbuild", "arch", "aur"]
 exclude = ["tests"]
 
 [dependencies]
-alpm = "2.0.0"
+alpm = "2.0.5"
 alpm-utils = "1.0.0"
 log = "0.4.14"
 raur = "5.0.1"
@@ -22,7 +22,7 @@ bitflags = "1.2.1"
 [dev-dependencies]
 async-trait = "0.1.50"
 simplelog = "0.10.0"
-tokio = { version = "1.6.1", features = ["macros", "rt"] }
+tokio = { version = "1.7.1", features = ["macros", "rt"] }
 
 [features]
 git = ["alpm/git", "alpm-utils/git"]
