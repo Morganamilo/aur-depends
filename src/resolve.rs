@@ -505,7 +505,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
         debug!("Caching done, building tree");
 
-        for aur_pkg in aur_targets {
+        for &aur_pkg in &aur_targets {
             let dep = Depend::new(aur_pkg);
 
             if !is_target
@@ -549,7 +549,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
             let is_make = make.contains(&aur_pkg);
             self.stack.push(aur_pkg.to_string());
-            self.resolve_aur_pkg_deps(&pkg, is_make)?;
+            self.resolve_aur_pkg_deps(&aur_targets, &pkg, is_make)?;
             self.stack.pop().unwrap();
 
             if self
@@ -640,7 +640,12 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         }
     }
 
-    fn resolve_aur_pkg_deps(&mut self, pkg: &ArcPackage, make: bool) -> Result<(), Error> {
+    fn resolve_aur_pkg_deps(
+        &mut self,
+        targs: &[&str],
+        pkg: &ArcPackage,
+        make: bool,
+    ) -> Result<(), Error> {
         if !self.flags.contains(Flags::NO_DEPS) {
             let check = if self.flags.contains(Flags::CHECK_DEPENDS) {
                 Some(&pkg.check_depends)
@@ -657,25 +662,32 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             for dep_str in depends {
                 let dep = Depend::new(dep_str.to_string());
 
-                if self.satisfied_build(&dep)
-                    || (!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep))
+                if self.satisfied_build(&dep) {
+                    continue;
+                }
+
+                let is_aur_targ = self.dep_is_aur_targ(targs, &dep);
+
+                if !is_aur_targ && ((!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep))
                     || (self.flags.contains(Flags::LOCAL_REPO)
                         && self.find_repo_satisfier_silent(dep.to_string()).is_some()
                         && self.satisfied_local(&dep))
                     || self.satisfied_install(&dep)
                     || self.resolved.contains(&dep.to_string())
-                    || self.assume_installed(&dep)
+                    || self.assume_installed(&dep))
                 {
                     continue;
                 }
 
                 self.resolved.insert(dep.to_string());
 
-                if let Some(pkg) = self.find_repo_satisfier(dep.to_string()) {
-                    self.stack.push(pkg.name().to_string());
-                    self.resolve_repo_pkg(pkg, false, true)?;
-                    self.stack.pop().unwrap();
-                    continue;
+                if !is_aur_targ {
+                    if let Some(pkg) = self.find_repo_satisfier(dep.to_string()) {
+                        self.stack.push(pkg.name().to_string());
+                        self.resolve_repo_pkg(pkg, false, true)?;
+                        self.stack.pop().unwrap();
+                        continue;
+                    }
                 }
 
                 let sat_pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false) {
@@ -698,7 +710,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 };
 
                 self.stack.push(dep_str.to_string());
-                self.resolve_aur_pkg_deps(&sat_pkg, true)?;
+                self.resolve_aur_pkg_deps(targs, &sat_pkg, true)?;
                 self.stack.pop();
 
                 let p = AurPackage {
@@ -744,6 +756,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             }
         }
 
+        debug!("pushing to install: {}", pkg.name());
         self.actions.install.push(RepoPackage { pkg, make, target });
 
         Ok(())
@@ -997,8 +1010,23 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         pkg
     }
 
+    fn dep_is_aur_targ(&self, targs: &[&str], dep: &Dep) -> bool {
+        if let Some(pkg) = self.find_satisfier_aur_cache(&dep) {
+            for &targ in targs {
+                if satisfies_aur_pkg(
+                    &Depend::new(targ),
+                    pkg,
+                    self.flags.contains(Flags::NO_DEP_VERSION),
+                ) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     fn push_build(&mut self, pkgbase: &str, pkg: AurPackage) {
-        debug!("pushing to build: {}", pkg.pkg.name);
         for base in &mut self.actions.build {
             if base.package_base() == pkgbase {
                 base.pkgs.push(pkg);
@@ -1006,6 +1034,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             }
         }
 
+        debug!("pushing to build: {}", pkg.pkg.name);
         self.actions.build.push(Base { pkgs: vec![pkg] });
     }
 
