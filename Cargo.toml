@@ -16,7 +16,7 @@ exclude = ["tests"]
 alpm = "2.0.5"
 alpm-utils = "1.0.0"
 log = "0.4.14"
-raur = "5.0.1"
+raur = { version = "5.0.1", default-features = false, features = ["async"] }
 bitflags = "1.2.1"
 
 [dev-dependencies]
