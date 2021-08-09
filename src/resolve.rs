@@ -670,7 +670,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 debug!("depend: {}", dep_str);
                 let dep = Depend::new(dep_str.to_string());
 
-                if self.satisfied_build(&dep) {
+                if self.satisfied_build(&dep) || self.resolved.contains(&dep.to_string()) {
                     continue;
                 }
 
@@ -682,7 +682,6 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                             && self.find_repo_satisfier_silent(dep.to_string()).is_some()
                             && self.satisfied_local(&dep))
                         || self.satisfied_install(&dep)
-                        || self.resolved.contains(&dep.to_string())
                         || self.assume_installed(&dep))
                 {
                     continue;
