@@ -3299,5 +3299,7 @@ pub fn raur() -> impl Raur {
 
     raur.pkg("xterm");
 
+    raur.pkg("systemd-git").depend("systemd").provide("systemd");
+
     raur
 }

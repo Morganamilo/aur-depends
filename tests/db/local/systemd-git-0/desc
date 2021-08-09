@@ -1,14 +1,14 @@
 %NAME%
-systemd
+systemd-git
 
 %VERSION%
-241.7-2
+0
 
 %BASE%
-systemd
+systemd-git
 
 %DESC%
-system and service manager
+system and service manager (git version)
 
 %URL%
 https://www.github.com/systemd/systemd
@@ -17,19 +17,16 @@ https://www.github.com/systemd/systemd
 x86_64
 
 %BUILDDATE%
-1550668070
+1628503287
 
 %INSTALLDATE%
-1553684924
+1628505579
 
 %PACKAGER%
-Christian Hesse <arch@eworm.de>
+Morganamilo <morganamilo@archlinux.org>
 
 %SIZE%
-21272576
-
-%GROUPS%
-base-devel
+28154804
 
 %LICENSE%
 GPL2
@@ -45,26 +42,38 @@ udev
 
 %DEPENDS%
 acl
+libacl.so=1-64
 bash
 cryptsetup
+libcryptsetup.so=12-64
 dbus
 iptables
 kbd
 kmod
+libkmod.so=2-64
 hwids
 libcap
+libcap.so=2-64
 libgcrypt
-systemd-libs
+libxcrypt
+libcrypt.so=2-64
+systemd-libs-git
 libidn2
-libidn2.so=0-64
 lz4
 pam
 libelf
 libseccomp
+libseccomp.so=2-64
 util-linux
+libblkid.so=1-64
+libmount.so=1-64
 xz
 pcre2
 audit
+libaudit.so=1-64
+libp11-kit
+libp11-kit.so=0-64
+openssl
 
 %OPTDEPENDS%
 libmicrohttpd: remote journald capabilities
@@ -72,14 +81,18 @@ quota-tools: kernel-level quota management
 systemd-sysvcompat: symlink package to provide sysvinit binaries
 polkit: allow administration as unprivileged user
 curl: machinectl pull-tar and pull-raw
+libfido2: unlocking LUKS2 volumes with FIDO2 token
+tpm2-tss: unlocking LUKS2 volumes with TPM2
 
 %CONFLICTS%
+systemd
 nss-myhostname
 systemd-tools
 udev
 
 %PROVIDES%
+systemd=249.r300.g2846007ecf
 nss-myhostname
-systemd-tools=241.7
-udev=241.7
+systemd-tools=249.r300.g2846007ecf
+udev=249.r300.g2846007ecf
 

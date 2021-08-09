@@ -508,6 +508,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         }
 
         debug!("Caching done, building tree");
+        debug!("targets: {:?}", aur_targets);
 
         for &aur_pkg in &aur_targets {
             let dep = Depend::new(aur_pkg);
@@ -596,6 +597,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
     /// pull in a list of all matches, if one is installed, default to it.
     /// unless we are looking for a target, then always show all options.
     fn select_satisfier_aur_cache(&self, dep: &Dep, target: bool) -> Option<&ArcPackage> {
+        debug!("select satisfier: {}", dep);
         if let Some(ref f) = self.provider_callback {
             let mut pkgs = self
                 .cache
@@ -650,6 +652,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         pkg: &ArcPackage,
         make: bool,
     ) -> Result<(), Error> {
+        debug!("resolve aur pkg deps: {}", pkg.package_base);
         if !self.flags.contains(Flags::NO_DEPS) {
             let check = if self.flags.contains(Flags::CHECK_DEPENDS) {
                 Some(&pkg.check_depends)
@@ -664,6 +667,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                 .chain(&pkg.depends);
 
             for dep_str in depends {
+                debug!("depend: {}", dep_str);
                 let dep = Depend::new(dep_str.to_string());
 
                 if self.satisfied_build(&dep) {
@@ -1610,6 +1614,12 @@ mod tests {
     async fn test_cyclic() {
         let TestActions { .. } = resolve(&["cyclic"], Flags::new()).await;
     }
+
+    #[tokio::test]
+    async fn test_cyclic2() {
+        let TestActions { .. } = resolve(&["systemd-git"], Flags::new()).await;
+    }
+
 
     #[tokio::test]
     async fn test_resolve_targets() {
