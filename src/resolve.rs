@@ -633,9 +633,10 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
             if let Some(true_pkg) = pkgs.iter().position(|pkg| *pkg == dep.name()) {
                 pkgs.swap(true_pkg, 0);
+                pkgs[1..].sort_unstable();
+            } else {
+                pkgs.sort_unstable();
             }
-
-            pkgs[1..].sort_unstable();
 
             let choice = f.0(dep.to_string().as_str(), &pkgs);
             debug!("choice was: {}={}", choice, pkgs[choice]);
