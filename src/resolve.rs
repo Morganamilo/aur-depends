@@ -29,7 +29,7 @@ bitflags! {
         const PROVIDES = 1 << 6;
         /// Calculate which packages are only needed to build the packages.
         const CALCULATE_MAKE = 1 << 7;
-        /// Calculate conflicts
+        /// Solve checkdepends.
         const CHECK_DEPENDS = 1 << 9;
         /// Ignore targets that are up to date.
         const NEEDED = 1 << 10;
