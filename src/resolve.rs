@@ -553,7 +553,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             }
 
             let is_make = make.contains(&aur_pkg);
-            self.stack.push(aur_pkg.to_string());
+            self.stack.push(pkg.name.clone());
             self.resolve_aur_pkg_deps(&aur_targets, &pkg, is_make)?;
             self.stack.pop().unwrap();
 
@@ -718,7 +718,7 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
                     continue;
                 };
 
-                self.stack.push(dep_str.to_string());
+                self.stack.push(sat_pkg.name.clone());
                 self.resolve_aur_pkg_deps(targs, &sat_pkg, true)?;
                 self.stack.pop();
 
