@@ -1,7 +1,7 @@
 use crate::actions::{
     Actions, AurPackage, AurUpdate, AurUpdates, Base, Missing, RepoPackage, Unneeded, Want,
 };
-use crate::satisfies::{satisfies_aur_pkg, satisfies_provide, satisfies_repo_pkg};
+use crate::satisfies::{satisfies_provide, Satisfies};
 use crate::Error;
 use bitflags::bitflags;
 
@@ -592,14 +592,14 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
 
     fn find_satisfier_aur_cache(&self, dep: &Dep) -> Option<&ArcPackage> {
         if let Some(pkg) = self.cache.get(dep.name()) {
-            if satisfies_aur_pkg(dep, pkg, self.flags.contains(Flags::NO_DEP_VERSION)) {
+            if pkg.satisfies_dep(dep, self.flags.contains(Flags::NO_DEP_VERSION)) {
                 return Some(pkg);
             }
         }
 
         self.cache
             .iter()
-            .find(|pkg| satisfies_aur_pkg(dep, pkg, self.flags.contains(Flags::NO_DEP_VERSION)))
+            .find(|pkg| pkg.satisfies_dep(dep, self.flags.contains(Flags::NO_DEP_VERSION)))
     }
 
     /// Expected behaviour
@@ -611,9 +611,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
             let mut pkgs = self
                 .cache
                 .iter()
-                .filter(|pkg| {
-                    satisfies_aur_pkg(dep, pkg, self.flags.contains(Flags::NO_DEP_VERSION))
-                })
+                .filter(|pkg| pkg.satisfies_dep(dep, self.flags.contains(Flags::NO_DEP_VERSION)))
                 .map(|pkg| pkg.name.as_str())
                 .collect::<Vec<_>>();
 
@@ -816,7 +814,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                     .map(|pkg| Depend::new(pkg.as_ref()))
                     .filter(|dep| {
                         !info.iter().any(|info| {
-                            satisfies_aur_pkg(dep, info, self.flags.contains(Flags::NO_DEP_VERSION))
+                            info.satisfies_dep(dep, self.flags.contains(Flags::NO_DEP_VERSION))
                         })
                     })
                     .map(|dep| dep.to_string())
@@ -890,9 +888,8 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
 
         ret.retain(|pkg| {
             pkgs.iter().any(|dep| {
-                satisfies_aur_pkg(
+                pkg.satisfies_dep(
                     &Depend::new(dep.as_ref()),
-                    pkg,
                     self.flags.contains(Flags::NO_DEP_VERSION),
                 )
             })
@@ -988,27 +985,23 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
             .iter()
             .flat_map(|base| &base.pkgs)
             .any(|build| {
-                satisfies_aur_pkg(
-                    target,
-                    &build.pkg,
-                    self.flags.contains(Flags::NO_DEP_VERSION),
-                )
+                build
+                    .pkg
+                    .satisfies_dep(target, self.flags.contains(Flags::NO_DEP_VERSION))
             })
     }
 
     fn satisfied_install(&self, target: &Dep) -> bool {
         self.actions.install.iter().any(|install| {
-            satisfies_repo_pkg(
-                target,
-                &install.pkg,
-                self.flags.contains(Flags::NO_DEP_VERSION),
-            )
+            install
+                .pkg
+                .satisfies_dep(target, self.flags.contains(Flags::NO_DEP_VERSION))
         })
     }
 
     fn satisfied_local(&self, target: &Dep) -> bool {
         if let Ok(pkg) = self.alpm.localdb().pkg(target.name()) {
-            if satisfies_repo_pkg(target, &pkg, self.flags.contains(Flags::NO_DEP_VERSION)) {
+            if pkg.satisfies_dep(target, self.flags.contains(Flags::NO_DEP_VERSION)) {
                 return true;
             }
         }
@@ -1046,9 +1039,8 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
     fn dep_is_aur_targ(&self, targs: &[&str], dep: &Dep) -> bool {
         if let Some(pkg) = self.find_satisfier_aur_cache(&dep) {
             for &targ in targs {
-                if satisfies_aur_pkg(
+                if pkg.satisfies_dep(
                     &Depend::new(targ),
-                    pkg,
                     self.flags.contains(Flags::NO_DEP_VERSION),
                 ) {
                     return true;
@@ -1100,7 +1092,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
 
                 let satisfied = runtime
                     .iter()
-                    .any(|dep| satisfies_repo_pkg(dep, &pkg.pkg, no_dep_ver));
+                    .any(|dep| pkg.pkg.satisfies_dep(dep, no_dep_ver));
 
                 if satisfied {
                     pkg.make = false;
@@ -1117,7 +1109,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
 
                     let satisfied = runtime
                         .iter()
-                        .any(|dep| satisfies_aur_pkg(dep, &pkg.pkg, no_dep_ver));
+                        .any(|dep| pkg.pkg.satisfies_dep(dep, no_dep_ver));
 
                     if satisfied {
                         pkg.make = false;

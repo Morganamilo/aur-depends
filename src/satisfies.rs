@@ -1,13 +1,33 @@
 use alpm::{AsDep, Dep, Depend, Ver, Version};
 use alpm_utils::depends;
 
-pub fn satisfies_aur_pkg(dep: &Dep, pkg: &raur::Package, nover: bool) -> bool {
-    let provides = pkg.provides.iter().map(|p| Depend::new(p.as_str()));
-    satisfies(dep, &pkg.name, Version::new(&*pkg.version), provides, nover)
+pub trait Satisfies {
+    fn satisfies_dep(&self, dep: &Dep, nover: bool) -> bool;
 }
 
-pub fn satisfies_repo_pkg(dep: &Dep, pkg: &alpm::Package, nover: bool) -> bool {
-    satisfies(dep, pkg.name(), pkg.version(), pkg.provides().iter(), nover)
+impl Satisfies for raur::Package {
+    fn satisfies_dep(&self, dep: &Dep, nover: bool) -> bool {
+        let provides = self.provides.iter().map(|p| Depend::new(p.as_str()));
+        satisfies(
+            dep,
+            &self.name,
+            Version::new(&*self.version),
+            provides,
+            nover,
+        )
+    }
+}
+
+impl<'a> Satisfies for alpm::Package<'a> {
+    fn satisfies_dep(&self, dep: &Dep, nover: bool) -> bool {
+        satisfies(
+            dep,
+            self.name(),
+            self.version(),
+            self.provides().iter(),
+            nover,
+        )
+    }
 }
 
 pub fn satisfies<D: AsDep, S: AsRef<str>, V: AsRef<Ver>>(

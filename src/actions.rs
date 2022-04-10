@@ -1,4 +1,4 @@
-use crate::satisfies::{satisfies_aur_pkg, satisfies_repo_pkg};
+use crate::satisfies::Satisfies;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
@@ -210,7 +210,7 @@ impl<'a> Actions<'a> {
             .filter(|pkg| !runtime || !pkg.make)
             .map(|pkg| &pkg.pkg)
             .filter(|pkg| pkg.name() != name)
-            .filter(|pkg| satisfies_repo_pkg(conflict, pkg, false))
+            .filter(|pkg| pkg.satisfies_dep(conflict, false))
             .for_each(|pkg| {
                 conflicts
                     .entry(pkg.name().to_string())
@@ -222,7 +222,7 @@ impl<'a> Actions<'a> {
             .filter(|pkg| !runtime || !pkg.make)
             .map(|pkg| &pkg.pkg)
             .filter(|pkg| pkg.name != name)
-            .filter(|pkg| satisfies_aur_pkg(conflict, pkg, false))
+            .filter(|pkg| pkg.satisfies_dep(conflict, false))
             .for_each(|pkg| {
                 conflicts
                     .entry(pkg.name.to_string())
@@ -245,7 +245,7 @@ impl<'a> Actions<'a> {
             .iter()
             .filter(|pkg| !self.has_pkg(pkg.name()))
             .filter(|pkg| pkg.name() != name)
-            .filter(|pkg| satisfies_repo_pkg(conflict, pkg, false))
+            .filter(|pkg| pkg.satisfies_dep(conflict, false))
             .for_each(|pkg| {
                 conflicts
                     .entry(name.to_string())
