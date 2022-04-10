@@ -167,7 +167,7 @@ pub struct Resolver<'a, 'b, H = raur::Handle> {
     aur_namespace: Option<String>,
 }
 
-impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
+impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'a, 'b, H> {
     /// Create a new Resolver
     pub fn new(alpm: &'a Alpm, cache: &'b mut Cache, raur: &'b H, flags: Flags) -> Self {
         let actions = Actions {
@@ -288,7 +288,10 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             .collect::<Vec<_>>();
 
         let local_pkg_names = local_pkgs.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
-        self.raur.cache_info(self.cache, &local_pkg_names).await?;
+        self.raur
+            .cache_info(self.cache, &local_pkg_names)
+            .await
+            .map_err(|e| Error::Raur(Box::new(e)))?;
         let mut missing = Vec::new();
         let mut ignored = Vec::new();
 
@@ -345,7 +348,10 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
             .flat_map(|db| db.pkgs())
             .map(|p| p.name())
             .collect::<Vec<_>>();
-        self.raur.cache_info(self.cache, &all_pkgs).await?;
+        self.raur
+            .cache_info(self.cache, &all_pkgs)
+            .await
+            .map_err(|e| Error::Raur(Box::new(e)))?;
 
         let mut updates = Vec::new();
         let mut seen = HashSet::new();
@@ -788,7 +794,11 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
         {
             self.cache_provides(&pkgs_nover).await
         } else {
-            let mut info = self.raur.cache_info(self.cache, &pkgs_nover).await?;
+            let mut info = self
+                .raur
+                .cache_info(self.cache, &pkgs_nover)
+                .await
+                .map_err(|e| Error::Raur(Box::new(e)))?;
 
             if self.flags.contains(Flags::MISSING_PROVIDES) {
                 let missing = pkgs
@@ -862,7 +872,11 @@ impl<'a, 'b, H: Raur + Sync> Resolver<'a, 'b, H> {
 
         debug!("trying to cache {:?}\n", to_info);
 
-        let mut ret = self.raur.cache_info(self.cache, &to_info).await?;
+        let mut ret = self
+            .raur
+            .cache_info(self.cache, &to_info)
+            .await
+            .map_err(|e| Error::Raur(Box::new(e)))?;
 
         ret.retain(|pkg| {
             pkgs.iter().any(|dep| {
@@ -1619,7 +1633,6 @@ mod tests {
     async fn test_cyclic2() {
         let TestActions { .. } = resolve(&["systemd-git"], Flags::new()).await;
     }
-
 
     #[tokio::test]
     async fn test_resolve_targets() {

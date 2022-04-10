@@ -9,6 +9,8 @@ pub struct MockRaur {
 
 #[async_trait]
 impl Raur for MockRaur {
+    type Err = Error;
+
     async fn search_by<S: AsRef<str> + Send + Sync>(
         &self,
         query: S,
@@ -115,7 +117,7 @@ impl<'a> MockPackage<'a> {
     }
 }
 
-pub fn raur() -> impl Raur {
+pub fn raur() -> impl Raur<Err = raur::Error> {
     let mut raur = MockRaur::new();
     raur.pkg("a").depend("b>1");
     raur.pkg("b").version("1");

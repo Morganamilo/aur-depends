@@ -6,18 +6,12 @@ pub enum Error {
     /// An error occurred in the alpm crate.
     Alpm(alpm::Error),
     /// An error occurred in the rua crate.
-    Raur(raur::Error),
+    Raur(Box<dyn std::error::Error>),
 }
 
 impl From<alpm::Error> for Error {
     fn from(e: alpm::Error) -> Error {
         Error::Alpm(e)
-    }
-}
-
-impl From<raur::Error> for Error {
-    fn from(e: raur::Error) -> Error {
-        Error::Raur(e)
     }
 }
 
