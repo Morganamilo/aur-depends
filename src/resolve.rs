@@ -1,5 +1,5 @@
 use crate::actions::{
-    Actions, AurPackage, AurUpdate, AurUpdates, Base, Missing, RepoPackage, Unneeded,
+    Actions, AurPackage, AurUpdate, AurUpdates, Base, Missing, RepoPackage, Unneeded, Want,
 };
 use crate::satisfies::{satisfies_aur_pkg, satisfies_provide, satisfies_repo_pkg};
 use crate::Error;
@@ -156,7 +156,7 @@ pub struct Resolver<'a, 'b, H = raur::Handle> {
     alpm: &'a Alpm,
     resolved: HashSet<String>,
     cache: &'b mut Cache,
-    stack: Vec<String>,
+    stack: Vec<Want>,
     raur: &'b H,
     actions: Actions<'a>,
     seen: HashSet<String>,
@@ -559,7 +559,10 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
             }
 
             let is_make = make.contains(&aur_pkg);
-            self.stack.push(pkg.name.clone());
+            self.stack.push(Want {
+                pkg: pkg.name.clone(),
+                dep: aur_pkg.to_string(),
+            });
             self.resolve_aur_pkg_deps(&aur_targets, &pkg, is_make)?;
             self.stack.pop().unwrap();
 
@@ -697,8 +700,12 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                 self.resolved.insert(dep.to_string());
 
                 if !is_aur_targ {
-                    if let Some(pkg) = self.find_repo_satisfier(dep.to_string()) {
-                        self.stack.push(pkg.name().to_string());
+                    let dep = dep.to_string();
+                    if let Some(pkg) = self.find_repo_satisfier(&dep) {
+                        self.stack.push(Want {
+                            pkg: pkg.name().to_string(),
+                            dep,
+                        });
                         self.resolve_repo_pkg(pkg, false, true)?;
                         self.stack.pop().unwrap();
                         continue;
@@ -724,7 +731,10 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                     continue;
                 };
 
-                self.stack.push(sat_pkg.name.clone());
+                self.stack.push(Want {
+                    pkg: sat_pkg.name.clone(),
+                    dep: dep.to_string(),
+                });
                 self.resolve_aur_pkg_deps(targs, &sat_pkg, true)?;
                 self.stack.pop();
 
@@ -1235,7 +1245,13 @@ mod tests {
             missing: actions
                 .missing
                 .into_iter()
-                .map(|m| m.stack.into_iter().chain(Some(m.dep)).collect())
+                .map(|m| {
+                    m.stack
+                        .into_iter()
+                        .map(|s| s.dep)
+                        .chain(Some(m.dep))
+                        .collect()
+                })
                 .collect(),
             make,
             targets,

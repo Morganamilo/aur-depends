@@ -169,13 +169,22 @@ pub struct AurUpdates<'a> {
     pub ignored: Vec<AurUpdate<'a>>,
 }
 
+/// Describes a package in the package stack.
+#[derive(Debug, Clone, Default)]
+pub struct Want {
+    /// The name of the package
+    pub pkg: String,
+    /// The dep string that pulled in the package.
+    pub dep: String,
+}
+
 /// A package that could not be resolved.
 #[derive(Debug, Clone, Default)]
 pub struct Missing {
     /// The Dependency we failed to satisfy.
     pub dep: String,
     /// The dependency path leadsing to pkg.
-    pub stack: Vec<String>,
+    pub stack: Vec<Want>,
 }
 
 impl<'a> Actions<'a> {
