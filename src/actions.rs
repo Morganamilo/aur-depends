@@ -28,8 +28,31 @@ pub struct Actions<'a> {
 
 impl<'a> Actions<'a> {
     /// An iterator over each individual package in self.build.
-    pub fn iter_build_pkgs(&self) -> impl Iterator<Item = &AurPackage> {
-        self.build.iter().flat_map(|b| &b.pkgs)
+    pub fn iter_aur_pkgs(&self) -> impl Iterator<Item = &AurPackage> {
+        self.build
+            .iter()
+            .filter_map(|b| match b {
+                Base::Aur(pkg) => Some(pkg),
+                Base::Custom(CustomPackages {
+                    srcinfo: _,
+                    pkgs: _,
+                }) => None,
+            })
+            .flatten()
+    }
+
+    /// An iterator over each individual package in self.build.
+    pub fn iter_custom_pkgs(&self) -> impl Iterator<Item = (&srcinfo::Srcinfo, &CustomPackage)> {
+        self.build
+            .iter()
+            .filter_map(|b| match b {
+                Base::Aur(_) => None,
+                Base::Custom(CustomPackages {
+                    srcinfo: base,
+                    pkgs,
+                }) => Some((base, pkgs)),
+            })
+            .flat_map(|(base, pkgs)| pkgs.iter().map(move |p| (base, p)))
     }
 }
 
@@ -66,47 +89,92 @@ pub struct Package<T> {
 /// Wrapper around ArcPackage for extra metadata.
 pub type AurPackage = Package<ArcPackage>;
 
+/// Wrapper around Srcinfo for extra metadata.
+pub type CustomPackage = Package<srcinfo::Package>;
+
 /// Wrapper around alpm::Package for extra metadata.
 pub type RepoPackage<'a> = Package<alpm::Package<'a>>;
 
-/// A package base.
+/// Packages from a custom repo.
 #[derive(Debug, Eq, Clone, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Base {
-    /// The packages that should be installed from the pkgbase.
-    pub pkgs: Vec<AurPackage>,
+pub struct CustomPackages {
+    /// The srcinfo of the pkgbase.
+    pub srcinfo: srcinfo::Srcinfo,
+    /// The pkgs from the srcinfo to install.
+    pub pkgs: Vec<CustomPackage>,
+}
+
+/// A package base.
+/// This descripes  packages that should be built then installed.
+#[derive(Debug, Eq, Clone, PartialEq, Ord, PartialOrd, Hash)]
+pub enum Base {
+    /// Aur packages.
+    Aur(Vec<AurPackage>),
+    /// Custom packages.
+    Custom(CustomPackages),
 }
 
 impl Display for Base {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if self.pkgs.len() == 1 && self.pkgs[0].pkg.name == self.package_base() {
-            write!(f, "{}-{}", self.package_base(), self.version())?;
+        let pkgbase = self.package_base();
+        let ver = self.version();
+
+        let (name, len) = match self {
+            Base::Aur(pkg) => (pkg[0].pkg.name.as_str(), pkg.len()),
+            Base::Custom(CustomPackages {
+                srcinfo: _,
+                pkgs: pkg,
+            }) => (pkg[0].pkg.pkgname.as_str(), pkg.len()),
+        };
+
+        if len == 1 && name == pkgbase {
+            write!(f, "{}-{}", pkgbase, ver)
         } else {
-            write!(
-                f,
-                "{}-{} ({}",
-                self.package_base(),
-                self.version(),
-                self.pkgs[0].pkg.name
-            )?;
-            for pkg in self.pkgs.iter().skip(1) {
-                f.write_str(" ")?;
-                f.write_str(&pkg.pkg.name)?;
+            write!(f, "{}-{} ({}", self.package_base(), self.version(), name)?;
+            match self {
+                Base::Aur(pkg) => {
+                    for pkg in pkg.iter().skip(1) {
+                        f.write_str(" ")?;
+                        f.write_str(&pkg.pkg.name)?;
+                    }
+                }
+                Base::Custom(CustomPackages {
+                    srcinfo: _,
+                    pkgs: pkg,
+                }) => {
+                    for pkg in pkg.iter().skip(1) {
+                        f.write_str(" ")?;
+                        f.write_str(&pkg.pkg.pkgname)?;
+                    }
+                }
             }
             f.write_str(")")?;
+            Ok(())
         }
-        Ok(())
     }
 }
 
 impl Base {
     /// Gets the package base of base.
     pub fn package_base(&self) -> &str {
-        self.pkgs[0].pkg.package_base.as_str()
+        match self {
+            Base::Aur(pkg) => &pkg[0].pkg.package_base,
+            Base::Custom(CustomPackages {
+                srcinfo: base,
+                pkgs: _,
+            }) => &base.base.pkgbase,
+        }
     }
 
     /// Gets the version of base.
-    pub fn version(&self) -> &str {
-        self.pkgs[0].pkg.version.as_str()
+    pub fn version(&self) -> String {
+        match self {
+            Base::Aur(pkg) => pkg[0].pkg.version.clone(),
+            Base::Custom(CustomPackages {
+                srcinfo: base,
+                pkgs: _,
+            }) => base.version(),
+        }
     }
 }
 
@@ -191,7 +259,8 @@ impl<'a> Actions<'a> {
     fn has_pkg<S: AsRef<str>>(&self, name: S) -> bool {
         let name = name.as_ref();
         let install = &self.install;
-        self.iter_build_pkgs().any(|pkg| pkg.pkg.name == name)
+        self.iter_aur_pkgs().any(|pkg| pkg.pkg.name == name)
+            || self.iter_custom_pkgs().any(|pkg| pkg.1.pkg.pkgname == name)
             || install.iter().any(|pkg| pkg.pkg.name() == name)
     }
 
@@ -218,7 +287,7 @@ impl<'a> Actions<'a> {
                     .push(name.to_string(), conflict);
             });
 
-        self.iter_build_pkgs()
+        self.iter_aur_pkgs()
             .filter(|pkg| !runtime || !pkg.make)
             .map(|pkg| &pkg.pkg)
             .filter(|pkg| pkg.name != name)
@@ -227,6 +296,17 @@ impl<'a> Actions<'a> {
                 conflicts
                     .entry(pkg.name.to_string())
                     .or_insert_with(|| Conflict::new(pkg.name.to_string()))
+                    .push(name.to_string(), conflict);
+            });
+        self.iter_custom_pkgs()
+            .filter(|(_, pkg)| !runtime || !pkg.make)
+            .filter(|(_, pkg)| pkg.pkg.pkgname != name)
+            .filter(|(base, pkg)| (*base, &pkg.pkg).satisfies_dep(conflict, false))
+            .map(|pkg| &pkg.1.pkg)
+            .for_each(|pkg| {
+                conflicts
+                    .entry(pkg.pkgname.clone())
+                    .or_insert_with(|| Conflict::new(pkg.pkgname.to_string()))
                     .push(name.to_string(), conflict);
             });
     }
@@ -265,7 +345,7 @@ impl<'a> Actions<'a> {
             }
         }
 
-        for pkg in self.iter_build_pkgs() {
+        for pkg in self.iter_aur_pkgs() {
             if runtime && pkg.make {
                 continue;
             }
@@ -274,6 +354,27 @@ impl<'a> Actions<'a> {
                 self.check_forward_conflict(
                     &pkg.pkg.name,
                     &Depend::new(conflict.to_string()),
+                    conflicts,
+                );
+            }
+        }
+        for (_, pkg) in self.iter_custom_pkgs() {
+            if runtime && pkg.make {
+                continue;
+            }
+
+            for conflict in pkg
+                .pkg
+                .conflicts
+                .iter()
+                .filter(|c| {
+                    c.arch.is_none() || c.arch.as_deref() == self.alpm.architectures().first()
+                })
+                .flat_map(|c| &c.vec)
+            {
+                self.check_forward_conflict(
+                    &pkg.pkg.pkgname,
+                    &Depend::new(conflict.clone()),
                     conflicts,
                 );
             }
@@ -291,7 +392,7 @@ impl<'a> Actions<'a> {
             }
         }
 
-        for pkg in self.iter_build_pkgs() {
+        for pkg in self.iter_aur_pkgs() {
             if runtime && pkg.make {
                 continue;
             }
@@ -299,6 +400,29 @@ impl<'a> Actions<'a> {
             for conflict in pkg.pkg.conflicts.iter() {
                 self.check_reverse_conflict(
                     &pkg.pkg.name,
+                    runtime,
+                    &Depend::new(conflict.to_string()),
+                    conflicts,
+                )
+            }
+        }
+
+        for (_, pkg) in self.iter_custom_pkgs() {
+            if runtime && pkg.make {
+                continue;
+            }
+
+            for conflict in pkg
+                .pkg
+                .conflicts
+                .iter()
+                .filter(|c| {
+                    c.arch.is_none() || c.arch.as_deref() == self.alpm.architectures().first()
+                })
+                .flat_map(|c| &c.vec)
+            {
+                self.check_reverse_conflict(
+                    &pkg.pkg.pkgname,
                     runtime,
                     &Depend::new(conflict.to_string()),
                     conflicts,
@@ -374,13 +498,17 @@ impl<'a> Actions<'a> {
     pub fn duplicate_targets(&self) -> Vec<String> {
         let mut names = HashSet::new();
 
-        let build = self.iter_build_pkgs().map(|pkg| pkg.pkg.name.as_str());
+        let build = self.iter_aur_pkgs().map(|pkg| pkg.pkg.name.as_str());
+        let custom = self
+            .iter_custom_pkgs()
+            .map(|pkg| pkg.1.pkg.pkgname.as_str());
 
         let duplicates = self
             .install
             .iter()
             .map(|pkg| pkg.pkg.name())
             .chain(build)
+            .chain(custom)
             .filter(|&name| !names.insert(name))
             .map(Into::into)
             .collect::<Vec<_>>();

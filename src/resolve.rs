@@ -1,8 +1,9 @@
 use crate::actions::{
     Actions, AurPackage, AurUpdate, AurUpdates, Base, Missing, RepoPackage, Unneeded, Want,
 };
+use crate::repo::Repo;
 use crate::satisfies::{satisfies_provide, Satisfies};
-use crate::Error;
+use crate::{CustomPackage, CustomPackages, Error};
 use bitflags::bitflags;
 
 use std::collections::HashSet;
@@ -13,6 +14,10 @@ use alpm_utils::{AsTarg, DbListExt};
 use log::Level::Debug;
 use log::{debug, log_enabled};
 use raur::{ArcPackage, Cache, Raur, SearchBy};
+
+// TODO: custom repo will not bundle pkg specific deps, which means a package from a srcinfo
+// already in build may not actually already be fully satisfied. check for this and if not push it
+// as a new pkgbase
 
 bitflags! {
     /// Config options for Handle.
@@ -33,10 +38,10 @@ bitflags! {
         const CHECK_DEPENDS = 1 << 9;
         /// Ignore targets that are up to date.
         const NEEDED = 1 << 10;
-        /// Only search the AUR for targets.
-        const AUR_ONLY = 1 << 11;
-        /// Only search the repos for targets.
-        const REPO_ONLY = 1 << 12;
+        /// Search aur for targets.
+        const AUR = 1 << 11;
+        /// Search alpm repos for targets.
+        const NATIVE_REPO = 1 << 12;
         /// when fetching updates, also include packages that are older than locally installed.
         const ENABLE_DOWNGRADE = 1 << 13;
         /// Asume packages are going to be put in a local repo.
@@ -53,6 +58,13 @@ impl Flags {
             | Flags::TARGET_PROVIDES
             | Flags::MISSING_PROVIDES
             | Flags::CHECK_DEPENDS
+            | Flags::AUR
+            | Flags::NATIVE_REPO
+    }
+
+    /// Create a new Flags with repo targets disabled
+    pub fn aur_only() -> Self {
+        Flags::new() & !Flags::NATIVE_REPO
     }
 }
 
@@ -110,6 +122,56 @@ pub struct Group<'a> {
     pub group: alpm::Group<'a>,
 }
 
+enum AurOrCustomPackage<'a> {
+    Aur(&'a raur::Package),
+    Custom(&'a srcinfo::Srcinfo, &'a srcinfo::Package),
+}
+
+impl<'a> AurOrCustomPackage<'a> {
+    fn pkgbase(&self) -> &str {
+        match self {
+            AurOrCustomPackage::Aur(pkg) => &pkg.package_base,
+            AurOrCustomPackage::Custom(base, _) => &base.base.pkgbase,
+        }
+    }
+
+    fn depends(&self, arch: &str, check_depends: bool) -> Vec<&str> {
+        match self {
+            AurOrCustomPackage::Aur(pkg) => {
+                let check = if check_depends {
+                    Some(&pkg.check_depends)
+                } else {
+                    None
+                };
+
+                pkg.make_depends
+                    .iter()
+                    .chain(check.into_iter().flatten())
+                    .chain(&pkg.depends)
+                    .map(|s| s.as_str())
+                    .collect()
+            }
+            AurOrCustomPackage::Custom(base, pkg) => {
+                let base = &base.base;
+                let check = if check_depends {
+                    Some(&base.checkdepends)
+                } else {
+                    None
+                };
+
+                base.makedepends
+                    .iter()
+                    .chain(check.into_iter().flatten())
+                    .chain(&pkg.depends)
+                    .filter(|d| d.arch == None || d.arch.as_deref() == Some(arch))
+                    .flat_map(|d| &d.vec)
+                    .map(|d| d.as_str())
+                    .collect()
+            }
+        }
+    }
+}
+
 /// Resolver is the main type for resolving dependencies
 ///
 /// Given a list of targets of either repo or AUR packages it will resolve the dependencies needed
@@ -137,7 +199,7 @@ pub struct Group<'a> {
 /// let alpm = Alpm::new("/", "/var/lib/pacman")?;
 /// let raur = Handle::default();
 /// let mut cache = HashSet::new();
-/// let resolver = Resolver::new(&alpm, &mut cache, &raur, Flags::new() | Flags::AUR_ONLY);
+/// let resolver = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::aur());
 /// let actions = resolver.resolve_targets(&["discord-canary", "spotify"]).await?;
 ///
 /// for install in &actions.install {
@@ -154,6 +216,7 @@ pub struct Group<'a> {
 #[derive(Debug)]
 pub struct Resolver<'a, 'b, H = raur::Handle> {
     alpm: &'a Alpm,
+    repos: Vec<Repo>,
     resolved: HashSet<String>,
     cache: &'b mut Cache,
     stack: Vec<Want>,
@@ -169,7 +232,13 @@ pub struct Resolver<'a, 'b, H = raur::Handle> {
 
 impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'a, 'b, H> {
     /// Create a new Resolver
-    pub fn new(alpm: &'a Alpm, cache: &'b mut Cache, raur: &'b H, flags: Flags) -> Self {
+    pub fn new(
+        alpm: &'a Alpm,
+        repos: Vec<Repo>,
+        cache: &'b mut Cache,
+        raur: &'b H,
+        flags: Flags,
+    ) -> Self {
         let actions = Actions {
             alpm,
             missing: Vec::new(),
@@ -180,6 +249,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
 
         Resolver {
             alpm,
+            repos,
             resolved: HashSet::new(),
             cache,
             stack: Vec::new(),
@@ -267,7 +337,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
     /// let alpm = Alpm::new("/", "/var/lib/pacman")?;
     /// let raur = Handle::default();
     /// let mut cache = HashSet::new();
-    /// let mut resolver = Resolver::new(&alpm, &mut cache, &raur, Flags::new() | Flags::AUR_ONLY);
+    /// let mut resolver = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::aur_only());
     ///
     /// let updates = resolver.aur_updates().await?;
     ///
@@ -428,6 +498,8 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
     ) -> Result<Actions<'a>, Error> {
         let mut aur_targets = Vec::new();
         let mut repo_targets = Vec::new();
+        let mut custom_repo_targets = Vec::new();
+
         let make = make_deps
             .iter()
             .map(|t| t.as_targ().pkg)
@@ -449,7 +521,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                 continue;
             }
 
-            if !self.flags.contains(Flags::AUR_ONLY) || !is_target {
+            if self.flags.contains(Flags::NATIVE_REPO) || !is_target {
                 if let Some(alpm_pkg) = self.find_repo_satisfier(pkg.pkg) {
                     repo_targets.push((pkg, alpm_pkg));
                     continue;
@@ -480,7 +552,24 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                 }
             }
 
-            if pkg.repo.is_none() && (!self.flags.contains(Flags::REPO_ONLY) || !is_target) {
+            'outer: for repo in &self.repos {
+                if pkg.repo.is_some() && pkg.repo != Some(repo.name.as_str()) {
+                    continue;
+                }
+
+                for base in &repo.pkgs {
+                    if base.satisfies_dep(
+                        &Depend::new(pkg.pkg),
+                        self.flags.contains(Flags::NO_DEP_VERSION),
+                    ) {
+                        custom_repo_targets.push(pkg);
+                        break 'outer;
+                    }
+                }
+            }
+
+            // TODO move to later
+            if pkg.repo.is_none() && (self.flags.contains(Flags::AUR) || !is_target) {
                 aur_targets.push(pkg.pkg);
                 continue;
             }
@@ -517,70 +606,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         debug!("targets: {:?}", aur_targets);
 
         for &aur_pkg in &aur_targets {
-            let dep = Depend::new(aur_pkg);
-
-            if !is_target
-                && ((!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep))
-                    || (self.flags.contains(Flags::LOCAL_REPO)
-                        && self.find_repo_satisfier_silent(dep.to_string()).is_some()
-                        && self.satisfied_local(&dep))
-                    || self.assume_installed(&dep))
-            {
-                continue;
-            }
-
-            let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, is_target) {
-                pkg.clone()
-            } else {
-                self.actions.missing.push(Missing {
-                    dep: dep.to_string(),
-                    stack: self.stack.clone(),
-                });
-                continue;
-            };
-
-            if self.flags.contains(Flags::NEEDED) || !is_target {
-                let is_devel = self
-                    .is_devel
-                    .as_ref()
-                    .map(|f| f.0(aur_pkg))
-                    .unwrap_or(false);
-
-                if !is_devel {
-                    if let Ok(local) = localdb.pkg(&*pkg.name) {
-                        if local.version() >= Version::new(&*pkg.version) {
-                            let unneeded =
-                                Unneeded::new(aur_pkg.to_string(), local.version().to_string());
-                            self.actions.unneeded.push(unneeded);
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            let is_make = make.contains(&aur_pkg);
-            self.stack.push(Want {
-                pkg: pkg.name.clone(),
-                dep: aur_pkg.to_string(),
-            });
-            self.resolve_aur_pkg_deps(&aur_targets, &pkg, is_make)?;
-            self.stack.pop().unwrap();
-
-            if self
-                .actions
-                .iter_build_pkgs()
-                .any(|p| p.pkg.name == pkg.name)
-            {
-                continue;
-            }
-
-            let p = AurPackage {
-                pkg: pkg.clone(),
-                make: false,
-                target: is_target,
-            };
-
-            self.push_build(&pkg.package_base, p);
+            self.resolve_aur_target(aur_pkg, &make, is_target, &aur_targets)?;
         }
 
         if self.flags.contains(Flags::CALCULATE_MAKE) {
@@ -588,6 +614,78 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         }
 
         Ok(self.actions)
+    }
+
+    fn resolve_aur_target(
+        &mut self,
+        aur_pkg: &str,
+        make: &HashSet<&str>,
+        is_target: bool,
+        targs: &[&str],
+    ) -> Result<(), Error> {
+        let dep = Depend::new(aur_pkg);
+        let localdb = self.alpm.localdb();
+
+        if self.should_skip_aur_pkg(&dep, is_target) {
+            return Ok(());
+        }
+
+        let pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, is_target) {
+            pkg.clone()
+        } else {
+            self.actions.missing.push(Missing {
+                dep: dep.to_string(),
+                stack: self.stack.clone(),
+            });
+            return Ok(());
+        };
+
+        if self.flags.contains(Flags::NEEDED) || !is_target {
+            let is_devel = self
+                .is_devel
+                .as_ref()
+                .map(|f| f.0(aur_pkg))
+                .unwrap_or(false);
+
+            if !is_devel {
+                if let Ok(local) = localdb.pkg(&*pkg.name) {
+                    if local.version() >= Version::new(&*pkg.version) {
+                        let unneeded =
+                            Unneeded::new(aur_pkg.to_string(), local.version().to_string());
+                        self.actions.unneeded.push(unneeded);
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        let is_make = make.contains(&aur_pkg);
+        self.stack.push(Want {
+            pkg: pkg.name.clone(),
+            dep: aur_pkg.to_string(),
+        });
+        self.resolve_aur_pkg_deps(targs, AurOrCustomPackage::Aur(&*pkg), is_make)?;
+        self.stack.pop().unwrap();
+
+        if self.actions.iter_aur_pkgs().any(|p| p.pkg.name == pkg.name) {
+            return Ok(());
+        }
+        if self
+            .actions
+            .iter_custom_pkgs()
+            .any(|p| p.1.pkg.pkgname == pkg.name)
+        {
+            return Ok(());
+        }
+
+        let p = AurPackage {
+            pkg: pkg.clone(),
+            make: false,
+            target: is_target,
+        };
+
+        self.push_aur_build(&pkg.package_base, p);
+        Ok(())
     }
 
     fn find_satisfier_aur_cache(&self, dep: &Dep) -> Option<&ArcPackage> {
@@ -657,24 +755,15 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
     fn resolve_aur_pkg_deps(
         &mut self,
         targs: &[&str],
-        pkg: &ArcPackage,
+        pkg: AurOrCustomPackage,
         make: bool,
     ) -> Result<(), Error> {
-        debug!("resolve aur pkg deps: {}", pkg.package_base);
+        debug!("resolve custom repo pkg deps: {}", pkg.pkgbase());
         if !self.flags.contains(Flags::NO_DEPS) {
-            let check = if self.flags.contains(Flags::CHECK_DEPENDS) {
-                Some(&pkg.check_depends)
-            } else {
-                None
-            };
-
-            let depends = pkg
-                .make_depends
-                .iter()
-                .chain(check.into_iter().flatten())
-                .chain(&pkg.depends);
-
-            for dep_str in depends {
+            for dep_str in pkg.depends(
+                self.alpm.architectures().first().unwrap_or(""),
+                self.flags.contains(Flags::CHECK_DEPENDS),
+            ) {
                 debug!("depend: {}", dep_str);
                 let dep = Depend::new(dep_str.to_string());
 
@@ -684,14 +773,10 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
 
                 let is_aur_targ = self.dep_is_aur_targ(targs, &dep);
 
-                if !is_aur_targ
-                    && ((!self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(&dep))
-                        || (self.flags.contains(Flags::LOCAL_REPO)
-                            && self.find_repo_satisfier_silent(dep.to_string()).is_some()
-                            && self.satisfied_local(&dep))
-                        || self.satisfied_install(&dep)
-                        || self.assume_installed(&dep))
-                {
+                if self.should_skip_aur_pkg(&dep, is_aur_targ) {
+                    continue;
+                }
+                if self.satisfied_install(&dep) {
                     continue;
                 }
 
@@ -710,10 +795,37 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                     }
                 }
 
+                if let Some((base, pkg)) = self.find_custom_repo_dep(&dep) {
+                    let base = base.clone();
+                    let pkg = pkg.clone();
+                    self.stack.push(Want {
+                        pkg: pkg.pkgname.clone(),
+                        dep: dep.to_string(),
+                    });
+                    self.resolve_aur_pkg_deps(
+                        targs,
+                        AurOrCustomPackage::Custom(&base, &pkg),
+                        true,
+                    )?;
+                    self.stack.pop();
+
+                    let pkg = CustomPackage {
+                        pkg,
+                        make,
+                        target: false,
+                    };
+
+                    self.push_custom_build(base, pkg);
+                    continue;
+                }
+
                 let sat_pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false) {
                     pkg.clone()
                 } else {
-                    debug!("failed to find '{}' in aur cache", dep.to_string(),);
+                    debug!(
+                        "failed to find '{}' in custom repo or aur cache",
+                        dep.to_string(),
+                    );
                     if log_enabled!(Debug) {
                         debug!(
                             "at time of failure pkgcache is: {:?}\n",
@@ -733,7 +845,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                     pkg: sat_pkg.name.clone(),
                     dep: dep.to_string(),
                 });
-                self.resolve_aur_pkg_deps(targs, &sat_pkg, true)?;
+                self.resolve_aur_pkg_deps(targs, AurOrCustomPackage::Aur(&*sat_pkg), true)?;
                 self.stack.pop();
 
                 let p = AurPackage {
@@ -742,11 +854,43 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                     target: false,
                 };
 
-                self.push_build(&sat_pkg.package_base, p);
+                self.push_aur_build(&sat_pkg.package_base, p);
             }
         }
 
         Ok(())
+    }
+
+    fn find_custom_repo_dep(&self, dep: &Depend) -> Option<(&srcinfo::Srcinfo, &srcinfo::Package)> {
+        for repo in &self.repos {
+            for base in &repo.pkgs {
+                if let Some(pkg) =
+                    base.which_satisfies_dep(&dep, self.flags.contains(Flags::NO_DEP_VERSION))
+                {
+                    return Some((base, base.pkg(pkg).unwrap()));
+                }
+            }
+        }
+        return None;
+    }
+
+    fn should_skip_aur_pkg(&self, dep: &Depend, is_target: bool) -> bool {
+        if !is_target {
+            if !self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(dep) {
+                return true;
+            }
+            if self.flags.contains(Flags::LOCAL_REPO)
+                && self.find_repo_satisfier_silent(dep.to_string()).is_some()
+                && self.satisfied_local(dep)
+            {
+                return true;
+            }
+            if self.assume_installed(dep) {
+                return true;
+            }
+        }
+
+        false
     }
 
     fn resolve_repo_pkg(
@@ -850,10 +994,12 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         for pkg in pkgs {
             let pkg = pkg.as_ref();
 
-            // Optimization, may break when using AUR_ONLY
-            // for example, trying to resolve "pacman" with AUR_ONLY should pull in
+            // Optimization, may break with alpm repos disabled
+            // for example, trying to resolve "pacman" with aur only should pull in
             // "pacman-git". But because pacman is installed locally, this optimization
             // causes us to not cache "pacman-git" and end up with missing.
+            //
+            // TODO: maybe check for local && not sync
             if self.alpm.localdb().pkg(pkg).is_ok() {
                 continue;
             }
@@ -980,15 +1126,27 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
     }
 
     fn satisfied_build(&self, target: &Dep) -> bool {
-        self.actions
-            .build
-            .iter()
-            .flat_map(|base| &base.pkgs)
-            .any(|build| {
-                build
-                    .pkg
-                    .satisfies_dep(target, self.flags.contains(Flags::NO_DEP_VERSION))
-            })
+        for build in &self.actions.build {
+            match build {
+                Base::Aur(pkgs) => {
+                    if pkgs.iter().any(|b| {
+                        b.pkg
+                            .satisfies_dep(target, self.flags.contains(Flags::NO_DEP_VERSION))
+                    }) {
+                        return true;
+                    }
+                }
+                Base::Custom(pkgs) => {
+                    if pkgs.pkgs.iter().any(|pkg| {
+                        (&pkgs.srcinfo, &pkg.pkg)
+                            .satisfies_dep(target, self.flags.contains(Flags::NO_DEP_VERSION))
+                    }) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     fn satisfied_install(&self, target: &Dep) -> bool {
@@ -1051,22 +1209,43 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         false
     }
 
-    fn push_build(&mut self, pkgbase: &str, pkg: AurPackage) {
+    fn push_aur_build(&mut self, pkgbase: &str, pkg: AurPackage) {
+        debug!("pushing to build: {}", pkg.pkg.name);
         for base in &mut self.actions.build {
-            if base.package_base() == pkgbase {
-                base.pkgs.push(pkg);
-                return;
+            if let Base::Aur(pkgs) = base {
+                if pkgs[0].pkg.package_base == pkgbase {
+                    pkgs.push(pkg);
+                    return;
+                }
             }
         }
 
-        debug!("pushing to build: {}", pkg.pkg.name);
-        self.actions.build.push(Base { pkgs: vec![pkg] });
+        self.actions.build.push(Base::Aur(vec![pkg]));
+    }
+
+    // TODO: multiple packages may have same pkgbase
+    fn push_custom_build(&mut self, base: srcinfo::Srcinfo, pkg: CustomPackage) {
+        debug!("pushing to build: {}", pkg.pkg.pkgname);
+        for build in &mut self.actions.build {
+            if let Base::Custom(pkgs) = build {
+                if pkgs.srcinfo.base.pkgbase == pkgs.srcinfo.base.pkgbase {
+                    pkgs.pkgs.push(pkg);
+                    return;
+                }
+            }
+        }
+
+        self.actions.build.push(Base::Custom(CustomPackages {
+            srcinfo: base,
+            pkgs: vec![pkg],
+        }));
     }
 
     fn calculate_make(&mut self) {
         let mut runtime = Vec::new();
         let mut run = true;
         let no_dep_ver = self.flags.contains(Flags::NO_DEP_VERSION);
+        let arch = self.alpm.architectures().first().clone();
 
         self.actions
             .install
@@ -1074,11 +1253,25 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
             .filter(|p| !p.make)
             .for_each(|p| runtime.extend(p.pkg.depends().iter().map(|d| d.to_depend())));
         self.actions
-            .build
-            .iter()
-            .flat_map(|b| &b.pkgs)
+            .iter_aur_pkgs()
             .filter(|p| !p.make)
             .for_each(|p| runtime.extend(p.pkg.depends.iter().map(|d| Depend::new(d.as_str()))));
+        self.actions
+            .iter_custom_pkgs()
+            .filter(|p| !p.1.make)
+            .for_each(|p| {
+                runtime.extend(
+                    p.1.pkg
+                        .depends
+                        .iter()
+                        .filter(|d| {
+                            d.arch.is_none()
+                                || d.arch.as_deref() == self.alpm.architectures().first()
+                        })
+                        .flat_map(|d| &d.vec)
+                        .map(|d| Depend::new(d.as_str())),
+                )
+            });
 
         runtime.sort_unstable_by_key(|a| a.to_string());
         runtime.dedup_by_key(|a| a.to_string());
@@ -1102,19 +1295,49 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
             }
 
             for base in &mut self.actions.build {
-                for pkg in &mut base.pkgs {
-                    if !pkg.make {
-                        continue;
+                match base {
+                    Base::Aur(base) => {
+                        for pkg in base {
+                            if !pkg.make {
+                                continue;
+                            }
+
+                            let satisfied = runtime
+                                .iter()
+                                .any(|dep| pkg.pkg.satisfies_dep(dep, no_dep_ver));
+
+                            if satisfied {
+                                pkg.make = false;
+                                run = true;
+                                runtime.extend(
+                                    pkg.pkg.depends.iter().map(|d| Depend::new(d.as_str())),
+                                );
+                            }
+                        }
                     }
+                    Base::Custom(pkgs) => {
+                        for pkg in &mut pkgs.pkgs {
+                            if !pkg.make {
+                                continue;
+                            }
 
-                    let satisfied = runtime
-                        .iter()
-                        .any(|dep| pkg.pkg.satisfies_dep(dep, no_dep_ver));
+                            let satisfied = runtime.iter().any(|dep| {
+                                (&pkgs.srcinfo, &pkg.pkg).satisfies_dep(dep, no_dep_ver)
+                            });
 
-                    if satisfied {
-                        pkg.make = false;
-                        run = true;
-                        runtime.extend(pkg.pkg.depends.iter().map(|d| Depend::new(d.as_str())));
+                            if satisfied {
+                                pkg.make = false;
+                                run = true;
+                                runtime.extend(
+                                    pkg.pkg
+                                        .depends
+                                        .iter()
+                                        .filter(|d| d.arch.is_none() || d.arch.as_deref() == arch)
+                                        .flat_map(|d| &d.vec)
+                                        .map(|d| Depend::new(d.as_str())),
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -1185,7 +1408,7 @@ mod tests {
         let alpm = alpm();
         let mut cache = HashSet::new();
 
-        let handle = Resolver::new(&alpm, &mut cache, &raur, flags)
+        let handle = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, flags)
             .aur_namespace(true)
             .provider_callback(|_, pkgs| {
                 debug!("provider choice: {:?}", pkgs);
@@ -1199,10 +1422,12 @@ mod tests {
         let actions = handle.resolve_targets(pkgs).await.unwrap();
 
         let mut build = actions
-            .build
-            .iter()
-            .flat_map(|b| &b.pkgs)
-            .map(|p| p.pkg.name.to_string())
+            .iter_aur_pkgs()
+            .map(|p| p.pkg.name.clone())
+            .collect::<Vec<_>>();
+        let mut custom = actions
+            .iter_aur_pkgs()
+            .map(|p| p.pkg.name.clone())
             .collect::<Vec<_>>();
 
         let mut install = actions
@@ -1212,23 +1437,25 @@ mod tests {
             .collect::<Vec<_>>();
 
         build.sort();
+        custom.sort();
         install.sort();
 
         let make = actions.install.iter().filter(|i| i.make).count()
-            + actions
-                .build
-                .iter()
-                .flat_map(|b| &b.pkgs)
-                .filter(|i| i.make)
-                .count();
+            + actions.iter_aur_pkgs().filter(|i| i.make).count()
+            + actions.iter_custom_pkgs().filter(|i| i.1.make).count();
 
-        let targets = actions
-            .build
-            .iter()
-            .flat_map(|base| &base.pkgs)
+        let mut targets = actions
+            .iter_aur_pkgs()
             .filter(|pkg| pkg.target)
             .map(|pkg| pkg.pkg.name.to_string())
             .collect::<Vec<_>>();
+
+        targets.extend(
+            actions
+                .iter_custom_pkgs()
+                .filter(|pkg| pkg.1.target)
+                .map(|pkg| pkg.1.pkg.pkgname.to_string()),
+        );
 
         TestActions {
             duplicates: actions.duplicate_targets(),
@@ -1361,7 +1588,7 @@ mod tests {
         let alpm = alpm();
         let mut cache = HashSet::new();
 
-        let mut handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
+        let mut handle = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::new());
         handle
             .cache_aur_pkgs_recursive(&["ros-melodic-desktop-full"], true)
             .await
@@ -1466,16 +1693,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_aur_only() {
-        let TestActions { build, install, .. } = resolve(
-            &["xterm", "yay"],
-            Flags::new() | Flags::NO_DEPS | Flags::AUR_ONLY,
-        )
-        .await;
+        let TestActions { build, install, .. } =
+            resolve(&["xterm", "yay"], Flags::aur_only() | Flags::NO_DEPS).await;
         assert_eq!(build, vec!["xterm", "yay-bin"]);
         assert_eq!(install, Vec::<String>::new());
 
         let TestActions { install, .. } =
-            resolve(&["pacman"], Flags::new() | Flags::NO_DEPS | Flags::AUR_ONLY).await;
+            resolve(&["pacman"], Flags::aur_only() | Flags::NO_DEPS).await;
         assert_eq!(install, Vec::<String>::new());
         //1assert_eq!(build, vec!["pacman-git"]);
     }
@@ -1484,17 +1708,14 @@ mod tests {
     async fn test_repo_only() {
         let TestActions { build, install, .. } = resolve(
             &["xterm", "yay"],
-            Flags::new() | Flags::NO_DEPS | Flags::REPO_ONLY,
+            (Flags::new() | Flags::NO_DEPS) & !Flags::AUR,
         )
         .await;
         assert_eq!(install, vec!["xterm"]);
         assert_eq!(build, Vec::<String>::new());
 
-        let TestActions { install, build, .. } = resolve(
-            &["pacman"],
-            Flags::new() | Flags::NO_DEPS | Flags::REPO_ONLY,
-        )
-        .await;
+        let TestActions { install, build, .. } =
+            resolve(&["pacman"], (Flags::new() | Flags::NO_DEPS) & !Flags::AUR).await;
         assert_eq!(install, vec!["pacman"]);
         assert_eq!(build, Vec::<String>::new());
     }
@@ -1518,7 +1739,7 @@ mod tests {
         let alpm = alpm();
         let raur = raur();
         let mut cache = HashSet::new();
-        let handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
+        let handle = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::new());
         let actions = handle
             .resolve_targets(&["yay", "yay-git", "yay-bin"])
             .await
@@ -1543,7 +1764,7 @@ mod tests {
         let alpm = alpm();
         let raur = raur();
         let mut cache = HashSet::new();
-        let handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
+        let handle = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::new());
         let actions = handle.resolve_targets(&["pacman-git"]).await.unwrap();
 
         let mut conflict = Conflict::new("pacman-git".into());
@@ -1557,7 +1778,7 @@ mod tests {
         let alpm = alpm();
         let raur = raur();
         let mut cache = HashSet::new();
-        let mut handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
+        let mut handle = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::new());
         let pkgs = handle.aur_updates().await.unwrap().updates;
         let pkgs = pkgs
             .iter()
@@ -1574,6 +1795,7 @@ mod tests {
         let mut cache = HashSet::new();
         let mut handle = Resolver::new(
             &alpm,
+            Vec::new(),
             &mut cache,
             &raur,
             Flags::new() | Flags::ENABLE_DOWNGRADE,
@@ -1650,10 +1872,12 @@ mod tests {
         let mut cache = HashSet::new();
         let flags = Flags::new() & !Flags::TARGET_PROVIDES & !Flags::MISSING_PROVIDES;
 
-        let handle = Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|_, pkgs| {
-            println!("provider choice: {:?}", pkgs);
-            0
-        });
+        let handle = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, flags).provider_callback(
+            |_, pkgs| {
+                println!("provider choice: {:?}", pkgs);
+                0
+            },
+        );
 
         let actions = handle
             .resolve_targets(&["ros-melodic-desktop-full"])
@@ -1667,10 +1891,11 @@ mod tests {
             .unwrap();
 
         actions
-            .build
-            .iter()
-            .flat_map(|b| &b.pkgs)
+            .iter_aur_pkgs()
             .for_each(|p| println!("b {}", p.pkg.name));
+        actions
+            .iter_custom_pkgs()
+            .for_each(|p| println!("c {}", p.1.pkg.pkgname));
 
         actions
             .install
@@ -1711,7 +1936,7 @@ mod tests {
 
         println!(
             "build: {}",
-            actions.build.iter().fold(0, |t, b| t + b.pkgs.len())
+            actions.iter_aur_pkgs().count() + actions.iter_custom_pkgs().count()
         );
 
         println!("install: {}", actions.install.len());

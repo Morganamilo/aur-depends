@@ -8,9 +8,9 @@
 
 mod actions;
 mod error;
+mod repo;
 mod resolve;
 mod satisfies;
-
 #[cfg(test)]
 mod tests;
 

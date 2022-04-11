@@ -2,11 +2,15 @@ use alpm::{AsDep, Dep, Depend, Ver, Version};
 use alpm_utils::depends;
 
 pub trait Satisfies {
-    fn satisfies_dep(&self, dep: &Dep, nover: bool) -> bool;
+    fn satisfies_dep(&self, dep: &Dep, nover: bool) -> bool {
+        self.which_satisfies_dep(dep, nover).is_some()
+    }
+
+    fn which_satisfies_dep(&self, dep: &Dep, nover: bool) -> Option<&str>;
 }
 
 impl Satisfies for raur::Package {
-    fn satisfies_dep(&self, dep: &Dep, nover: bool) -> bool {
+    fn which_satisfies_dep(&self, dep: &Dep, nover: bool) -> Option<&str> {
         let provides = self.provides.iter().map(|p| Depend::new(p.as_str()));
         satisfies(
             dep,
@@ -15,11 +19,12 @@ impl Satisfies for raur::Package {
             provides,
             nover,
         )
+        .then(|| self.name.as_str())
     }
 }
 
 impl<'a> Satisfies for alpm::Package<'a> {
-    fn satisfies_dep(&self, dep: &Dep, nover: bool) -> bool {
+    fn which_satisfies_dep(&self, dep: &Dep, nover: bool) -> Option<&str> {
         satisfies(
             dep,
             self.name(),
@@ -27,6 +32,48 @@ impl<'a> Satisfies for alpm::Package<'a> {
             self.provides().iter(),
             nover,
         )
+        .then(|| self.name())
+    }
+}
+
+impl Satisfies for srcinfo::Srcinfo {
+    fn which_satisfies_dep(&self, dep: &Dep, nover: bool) -> Option<&str> {
+        self.pkgs.iter().find_map(|pkg| {
+            let provides = pkg
+                .provides
+                .iter()
+                .flat_map(|p| &p.vec)
+                .map(|p| Depend::new(p.as_str()));
+
+            satisfies(
+                dep,
+                &pkg.pkgname,
+                Version::new(&*self.version()),
+                provides,
+                nover,
+            )
+            .then(|| pkg.pkgname.as_str())
+        })
+    }
+}
+
+impl Satisfies for (&srcinfo::Srcinfo, &srcinfo::Package) {
+    fn which_satisfies_dep(&self, dep: &Dep, nover: bool) -> Option<&str> {
+        let provides = self
+            .1
+            .provides
+            .iter()
+            .flat_map(|p| &p.vec)
+            .map(|p| Depend::new(p.as_str()));
+
+        satisfies(
+            dep,
+            &self.1.pkgname,
+            Version::new(&*self.0.version()),
+            provides,
+            nover,
+        )
+        .then(|| self.1.pkgname.as_str())
     }
 }
 
