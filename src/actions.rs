@@ -52,7 +52,7 @@ impl<'a> Actions<'a> {
                     pkgs,
                 }) => Some((base, pkgs)),
             })
-            .flat_map(|(base, pkgs)| pkgs.iter().map(move |p| (base, p)))
+            .flat_map(|(base, pkgs)| pkgs.iter().map(move |p| (base.as_ref(), p)))
     }
 }
 
@@ -99,7 +99,7 @@ pub type RepoPackage<'a> = Package<alpm::Package<'a>>;
 #[derive(Debug, Eq, Clone, PartialEq, Ord, PartialOrd, Hash)]
 pub struct CustomPackages {
     /// The srcinfo of the pkgbase.
-    pub srcinfo: srcinfo::Srcinfo,
+    pub srcinfo: Box<srcinfo::Srcinfo>,
     /// The pkgs from the srcinfo to install.
     pub pkgs: Vec<CustomPackage>,
 }

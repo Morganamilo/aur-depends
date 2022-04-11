@@ -865,13 +865,13 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         for repo in &self.repos {
             for base in &repo.pkgs {
                 if let Some(pkg) =
-                    base.which_satisfies_dep(&dep, self.flags.contains(Flags::NO_DEP_VERSION))
+                    base.which_satisfies_dep(dep, self.flags.contains(Flags::NO_DEP_VERSION))
                 {
                     return Some((base, base.pkg(pkg).unwrap()));
                 }
             }
         }
-        return None;
+        None
     }
 
     fn should_skip_aur_pkg(&self, dep: &Depend, is_target: bool) -> bool {
@@ -1075,7 +1075,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
             )
         }*/
 
-        let pkgs = self.cache_aur_pkgs(&pkgs, target).await?;
+        let pkgs = self.cache_aur_pkgs(pkgs, target).await?;
         if self.flags.contains(Flags::NO_DEPS) {
             return Ok(Vec::new());
         }
@@ -1138,7 +1138,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                 }
                 Base::Custom(pkgs) => {
                     if pkgs.pkgs.iter().any(|pkg| {
-                        (&pkgs.srcinfo, &pkg.pkg)
+                        (&*pkgs.srcinfo, &pkg.pkg)
                             .satisfies_dep(target, self.flags.contains(Flags::NO_DEP_VERSION))
                     }) {
                         return true;
@@ -1181,7 +1181,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         let mut target = target.as_ref();
 
         if self.flags.contains(Flags::NO_DEP_VERSION) {
-            target = target.splitn(2, is_ver_char).next().unwrap();
+            target = target.split_once(is_ver_char).map_or(target, |x| x.0)
         }
 
         self.alpm.syncdbs().find_satisfier(target)
@@ -1195,7 +1195,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
     }
 
     fn dep_is_aur_targ(&self, targs: &[&str], dep: &Dep) -> bool {
-        if let Some(pkg) = self.find_satisfier_aur_cache(&dep) {
+        if let Some(pkg) = self.find_satisfier_aur_cache(dep) {
             for &targ in targs {
                 if pkg.satisfies_dep(
                     &Depend::new(targ),
@@ -1228,7 +1228,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         debug!("pushing to build: {}", pkg.pkg.pkgname);
         for build in &mut self.actions.build {
             if let Base::Custom(pkgs) = build {
-                if pkgs.srcinfo.base.pkgbase == pkgs.srcinfo.base.pkgbase {
+                if pkgs.srcinfo.base.pkgbase == base.base.pkgbase {
                     pkgs.pkgs.push(pkg);
                     return;
                 }
@@ -1236,7 +1236,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         }
 
         self.actions.build.push(Base::Custom(CustomPackages {
-            srcinfo: base,
+            srcinfo: Box::new(base),
             pkgs: vec![pkg],
         }));
     }
@@ -1245,7 +1245,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         let mut runtime = Vec::new();
         let mut run = true;
         let no_dep_ver = self.flags.contains(Flags::NO_DEP_VERSION);
-        let arch = self.alpm.architectures().first().clone();
+        let arch = self.alpm.architectures().first();
 
         self.actions
             .install
@@ -1322,7 +1322,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                             }
 
                             let satisfied = runtime.iter().any(|dep| {
-                                (&pkgs.srcinfo, &pkg.pkg).satisfies_dep(dep, no_dep_ver)
+                                (&*pkgs.srcinfo, &pkg.pkg).satisfies_dep(dep, no_dep_ver)
                             });
 
                             if satisfied {
