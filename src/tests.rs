@@ -3303,5 +3303,9 @@ pub fn raur() -> impl Raur<Err = raur::Error> {
 
     raur.pkg("systemd-git").depend("systemd").provide("systemd");
 
+    raur.pkg("c1").depend("c2");
+    raur.pkg("c2").depend("c3");
+    raur.pkg("c3");
+
     raur
 }

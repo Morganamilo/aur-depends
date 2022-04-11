@@ -1,0 +1,8 @@
+pkgbase = custom
+	pkgver = 1
+	pkgrel = 1
+	arch = any
+	makedepends = cargo
+	depends = c1
+
+pkgname = custom
