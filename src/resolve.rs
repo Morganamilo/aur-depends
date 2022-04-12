@@ -885,7 +885,6 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                     }
                 }
 
-                println!("dep {dep}");
                 if let Some((repo, base, pkg)) = self.find_custom_repo_dep(None, &dep) {
                     let repo = repo.to_string();
                     let base = base.clone();
