@@ -18,4 +18,5 @@ mod tests;
 pub use crate::actions::*;
 pub use crate::base::*;
 pub use crate::error::*;
+pub use crate::repo::*;
 pub use crate::resolve::*;

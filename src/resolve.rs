@@ -123,6 +123,7 @@ pub struct Group<'a> {
     pub group: alpm::Group<'a>,
 }
 
+#[derive(Debug)]
 enum AurOrCustomPackage<'a> {
     Aur(&'a raur::Package),
     Custom(&'a str, &'a srcinfo::Srcinfo, &'a srcinfo::Package),
@@ -509,7 +510,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             .collect::<HashSet<&str>>();
         let localdb = self.alpm.localdb();
 
-        for pkg in deps.iter().chain(make_deps) {
+        'deps: for pkg in deps.iter().chain(make_deps) {
             let pkg = pkg.as_targ();
             // TODO
             // Not handle repo/pkg for !is_target
@@ -555,7 +556,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 }
             }
 
-            'outer: for repo in &self.repos {
+            for repo in &self.repos {
                 if pkg.repo.is_some() && pkg.repo != Some(repo.name.as_str()) {
                     continue;
                 }
@@ -566,7 +567,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                         self.flags.contains(Flags::NO_DEP_VERSION),
                     ) {
                         custom_repo_targets.push(pkg);
-                        break 'outer;
+                        continue 'deps;
                     }
                 }
             }
@@ -582,7 +583,8 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             });
         }
 
-        // todo also cache deps for custom;
+        debug!("aur targets are {:?}", aur_targets);
+        debug!("custom targets are {:?}", custom_repo_targets);
 
         self.cache_aur_pkgs_recursive(&aur_targets, &custom_repo_targets, true)
             .await?;
@@ -1101,7 +1103,6 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             if let Some(word) = pkg.rsplitn(2, split_pkgname).last() {
                 debug!("provide search: {} {}", pkg, word);
                 to_info.extend(
-                    //TODO: async?
                     self.raur
                         .search_by(word, SearchBy::NameDesc)
                         .await
