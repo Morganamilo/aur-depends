@@ -32,11 +32,8 @@ impl<'a> Actions<'a> {
         self.build
             .iter()
             .filter_map(|b| match b {
-                Base::Aur(pkg) => Some(pkg),
-                Base::Custom(CustomPackages {
-                    srcinfo: _,
-                    pkgs: _,
-                }) => None,
+                Base::Aur(pkg) => Some(&pkg.pkgs),
+                Base::Custom(_) => None,
             })
             .flatten()
     }
@@ -104,49 +101,38 @@ pub struct CustomPackages {
     pub pkgs: Vec<CustomPackage>,
 }
 
+/// Describes an AUR package base.
+#[derive(Debug, Eq, Clone, PartialEq, Ord, PartialOrd, Hash)]
+pub struct AurBase {
+    /// List of packages belonging to the package base.
+    pub pkgs: Vec<AurPackage>,
+}
+
 /// A package base.
 /// This descripes  packages that should be built then installed.
 #[derive(Debug, Eq, Clone, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Base {
     /// Aur packages.
-    Aur(Vec<AurPackage>),
+    Aur(AurBase),
     /// Custom packages.
     Custom(CustomPackages),
 }
 
-impl Display for Base {
+impl Display for AurBase {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let pkgbase = self.package_base();
         let ver = self.version();
 
-        let (name, len) = match self {
-            Base::Aur(pkg) => (pkg[0].pkg.name.as_str(), pkg.len()),
-            Base::Custom(CustomPackages {
-                srcinfo: _,
-                pkgs: pkg,
-            }) => (pkg[0].pkg.pkgname.as_str(), pkg.len()),
-        };
+        let name = self.package_base();
+        let len = self.pkgs.len();
 
         if len == 1 && name == pkgbase {
             write!(f, "{}-{}", pkgbase, ver)
         } else {
             write!(f, "{}-{} ({}", self.package_base(), self.version(), name)?;
-            match self {
-                Base::Aur(pkg) => {
-                    for pkg in pkg.iter().skip(1) {
-                        f.write_str(" ")?;
-                        f.write_str(&pkg.pkg.name)?;
-                    }
-                }
-                Base::Custom(CustomPackages {
-                    srcinfo: _,
-                    pkgs: pkg,
-                }) => {
-                    for pkg in pkg.iter().skip(1) {
-                        f.write_str(" ")?;
-                        f.write_str(&pkg.pkg.pkgname)?;
-                    }
-                }
+            for pkg in self.pkgs.iter().skip(1) {
+                f.write_str(" ")?;
+                f.write_str(&pkg.pkg.name)?;
             }
             f.write_str(")")?;
             Ok(())
@@ -154,26 +140,83 @@ impl Display for Base {
     }
 }
 
+impl Display for CustomPackages {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let pkgbase = self.package_base();
+        let ver = self.version();
+
+        let name = self.package_base();
+        let len = self.pkgs.len();
+
+        if len == 1 && name == pkgbase {
+            write!(f, "{}-{}", pkgbase, ver)
+        } else {
+            write!(f, "{}-{} ({}", self.package_base(), self.version(), name)?;
+            for pkg in self.pkgs.iter().skip(1) {
+                f.write_str(" ")?;
+                f.write_str(&pkg.pkg.pkgname)?;
+            }
+            f.write_str(")")?;
+            Ok(())
+        }
+    }
+}
+
+impl Display for Base {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Base::Aur(base) => base.fmt(f),
+            Base::Custom(base) => base.fmt(f),
+        }
+    }
+}
+
+impl AurBase {
+    /// Gets the package base of base.
+    pub fn package_base(&self) -> &str {
+        &self.pkgs[0].pkg.package_base
+    }
+
+    /// Gets the version of base.
+    pub fn version(&self) -> String {
+        self.pkgs[0].pkg.version.clone()
+    }
+}
+
+impl CustomPackages {
+    /// Gets the package base of base.
+    pub fn package_base(&self) -> &str {
+        &self.srcinfo.base.pkgbase
+    }
+
+    /// Gets the version of base.
+    pub fn version(&self) -> String {
+        self.srcinfo.version()
+    }
+}
+
 impl Base {
     /// Gets the package base of base.
     pub fn package_base(&self) -> &str {
         match self {
-            Base::Aur(pkg) => &pkg[0].pkg.package_base,
-            Base::Custom(CustomPackages {
-                srcinfo: base,
-                pkgs: _,
-            }) => &base.base.pkgbase,
+            Base::Aur(base) => base.package_base(),
+            Base::Custom(base) => base.package_base(),
         }
     }
 
     /// Gets the version of base.
     pub fn version(&self) -> String {
         match self {
-            Base::Aur(pkg) => pkg[0].pkg.version.clone(),
-            Base::Custom(CustomPackages {
-                srcinfo: base,
-                pkgs: _,
-            }) => base.version(),
+            Base::Aur(base) => base.version(),
+            Base::Custom(base) => base.version(),
+        }
+    }
+
+    /// Ammount of packages in this base.
+    pub fn package_count(&self) -> usize {
+        match self {
+            Base::Aur(base) => base.pkgs.len(),
+            Base::Custom(base) => base.pkgs.len(),
         }
     }
 }

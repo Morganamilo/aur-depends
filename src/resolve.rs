@@ -3,7 +3,7 @@ use crate::actions::{
 };
 use crate::repo::Repo;
 use crate::satisfies::{satisfies_provide, Satisfies};
-use crate::{CustomPackage, CustomPackages, Error};
+use crate::{AurBase, CustomPackage, CustomPackages, Error};
 use bitflags::bitflags;
 
 use std::collections::HashSet;
@@ -230,7 +230,7 @@ pub struct Resolver<'a, 'b, H = raur::Handle> {
     aur_namespace: Option<String>,
 }
 
-impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'a, 'b, H> {
+impl<'a, 'b, E: std::error::Error + Sync + 'static, H: Raur<Err = E> + Sync> Resolver<'a, 'b, H> {
     /// Create a new Resolver
     pub fn new(
         alpm: &'a Alpm,
@@ -1273,7 +1273,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         for build in &self.actions.build {
             match build {
                 Base::Aur(pkgs) => {
-                    if pkgs.iter().any(|b| {
+                    if pkgs.pkgs.iter().any(|b| {
                         b.pkg
                             .satisfies_dep(target, self.flags.contains(Flags::NO_DEP_VERSION))
                     }) {
@@ -1357,14 +1357,16 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         debug!("pushing to build: {}", pkg.pkg.name);
         for base in &mut self.actions.build {
             if let Base::Aur(pkgs) = base {
-                if pkgs[0].pkg.package_base == pkgbase {
-                    pkgs.push(pkg);
+                if pkgs.pkgs[0].pkg.package_base == pkgbase {
+                    pkgs.pkgs.push(pkg);
                     return;
                 }
             }
         }
 
-        self.actions.build.push(Base::Aur(vec![pkg]));
+        self.actions
+            .build
+            .push(Base::Aur(AurBase { pkgs: vec![pkg] }));
     }
 
     // TODO: multiple packages may have same pkgbase
@@ -1441,7 +1443,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
             for base in &mut self.actions.build {
                 match base {
                     Base::Aur(base) => {
-                        for pkg in base {
+                        for pkg in &mut base.pkgs {
                             if !pkg.make {
                                 continue;
                             }
@@ -1620,7 +1622,7 @@ mod tests {
                 .map(|m| {
                     m.stack
                         .into_iter()
-                        .map(|s| s.dep)
+                        .map(|s| s.pkg)
                         .chain(Some(m.dep))
                         .collect()
                 })
