@@ -7,15 +7,15 @@
 //! See [`Resolver`](struct.Resolver.html) for more info.
 
 mod actions;
+mod base;
 mod error;
 mod repo;
 mod resolve;
 mod satisfies;
 #[cfg(test)]
 mod tests;
-mod base;
 
 pub use crate::actions::*;
-pub use crate::error::*;
 pub use crate::base::*;
+pub use crate::error::*;
 pub use crate::resolve::*;

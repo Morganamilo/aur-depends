@@ -125,14 +125,14 @@ pub struct Group<'a> {
 
 enum AurOrCustomPackage<'a> {
     Aur(&'a raur::Package),
-    Custom(&'a srcinfo::Srcinfo, &'a srcinfo::Package),
+    Custom(&'a str, &'a srcinfo::Srcinfo, &'a srcinfo::Package),
 }
 
 impl<'a> AurOrCustomPackage<'a> {
     fn pkgbase(&self) -> &str {
         match self {
             AurOrCustomPackage::Aur(pkg) => &pkg.package_base,
-            AurOrCustomPackage::Custom(base, _) => &base.base.pkgbase,
+            AurOrCustomPackage::Custom(_, base, _) => &base.base.pkgbase,
         }
     }
 
@@ -152,7 +152,7 @@ impl<'a> AurOrCustomPackage<'a> {
                     .map(|s| s.as_str())
                     .collect()
             }
-            AurOrCustomPackage::Custom(base, pkg) => {
+            AurOrCustomPackage::Custom(_, base, pkg) => {
                 let base = &base.base;
                 let check = if check_depends {
                     Some(&base.checkdepends)
@@ -709,9 +709,9 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             return Ok(());
         }
 
-        let (base, pkg) =
-            if let Some((base, pkg)) = self.find_custom_repo_dep(custom_pkg.repo, &dep) {
-                (base, pkg)
+        let (repo, base, pkg) =
+            if let Some((repo, base, pkg)) = self.find_custom_repo_dep(custom_pkg.repo, &dep) {
+                (repo, base, pkg)
             } else {
                 self.actions.missing.push(Missing {
                     dep: dep.to_string(),
@@ -741,12 +741,17 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
         let base = base.clone();
         let pkg = pkg.clone();
+        let repo = repo.to_string();
         let is_make = make.contains(&custom_pkg.pkg);
         self.stack.push(new_want(
             pkg.pkgname.to_string(),
             custom_pkg.pkg.to_string(),
         ));
-        self.resolve_aur_pkg_deps(targs, AurOrCustomPackage::Custom(&base, &pkg), is_make)?;
+        self.resolve_aur_pkg_deps(
+            targs,
+            AurOrCustomPackage::Custom(&repo, &base, &pkg),
+            is_make,
+        )?;
         self.stack.pop().unwrap();
 
         if self
@@ -770,7 +775,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             target: is_target,
         };
 
-        self.push_custom_build(base, p);
+        self.push_custom_build(repo.to_string(), base, p);
         Ok(())
     }
 
@@ -879,14 +884,15 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 }
 
                 println!("dep {dep}");
-                if let Some((base, pkg)) = self.find_custom_repo_dep(None, &dep) {
+                if let Some((repo, base, pkg)) = self.find_custom_repo_dep(None, &dep) {
+                    let repo = repo.to_string();
                     let base = base.clone();
                     let pkg = pkg.clone();
                     self.stack
                         .push(new_want(pkg.pkgname.to_string(), dep.to_string()));
                     self.resolve_aur_pkg_deps(
                         targs,
-                        AurOrCustomPackage::Custom(&base, &pkg),
+                        AurOrCustomPackage::Custom(&repo, &base, &pkg),
                         true,
                     )?;
                     self.stack.pop();
@@ -897,7 +903,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                         target: false,
                     };
 
-                    self.push_custom_build(base, pkg);
+                    self.push_custom_build(repo.to_string(), base, pkg);
                     continue;
                 }
 
@@ -945,7 +951,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         &self,
         repo_targ: Option<&str>,
         dep: &Depend,
-    ) -> Option<(&srcinfo::Srcinfo, &srcinfo::Package)> {
+    ) -> Option<(&str, &srcinfo::Srcinfo, &srcinfo::Package)> {
         for repo in &self.repos {
             if repo_targ.is_some() && Some(repo.name.as_str()) != repo_targ {
                 continue;
@@ -955,7 +961,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 if let Some(pkg) =
                     base.which_satisfies_dep(dep, self.flags.contains(Flags::NO_DEP_VERSION))
                 {
-                    return Some((base, base.pkg(pkg).unwrap()));
+                    return Some((&repo.name, base, base.pkg(pkg).unwrap()));
                 }
             }
         }
@@ -1171,9 +1177,9 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         let mut new_resolved = HashSet::new();
 
         let pkg = Depend::new(targ.pkg);
-        if let Some((base, pkg)) = self.find_custom_repo_dep(targ.repo, &pkg) {
+        if let Some((repo, base, pkg)) = self.find_custom_repo_dep(targ.repo, &pkg) {
             let arch = self.alpm.architectures().first().unwrap_or("");
-            let custom = AurOrCustomPackage::Custom(base, pkg);
+            let custom = AurOrCustomPackage::Custom(repo, base, pkg);
             let deps = custom.depends(arch, self.flags.contains(Flags::NO_DEP_VERSION));
 
             for pkg in deps {
@@ -1373,7 +1379,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     }
 
     // TODO: multiple packages may have same pkgbase
-    fn push_custom_build(&mut self, base: srcinfo::Srcinfo, pkg: CustomPackage) {
+    fn push_custom_build(&mut self, repo: String, base: srcinfo::Srcinfo, pkg: CustomPackage) {
         debug!("pushing to build: {}", pkg.pkg.pkgname);
         for build in &mut self.actions.build {
             if let Base::Custom(pkgs) = build {
@@ -1385,6 +1391,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         }
 
         self.actions.build.push(Base::Custom(CustomPackages {
+            repo,
             srcinfo: Box::new(base),
             pkgs: vec![pkg],
         }));

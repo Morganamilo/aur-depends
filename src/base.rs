@@ -7,11 +7,15 @@ enum PkgNames<A, C> {
     Custom(C),
 }
 
-impl<'a, A, C> Iterator for PkgNames<A, C> where A: Iterator<Item=&'a str>, C: Iterator<Item=&'a str> {
+impl<'a, A, C> Iterator for PkgNames<A, C>
+where
+    A: Iterator<Item = &'a str>,
+    C: Iterator<Item = &'a str>,
+{
     type Item = &'a str;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self  {
+        match self {
             PkgNames::Aur(i) => i.next(),
             PkgNames::Custom(i) => i.next(),
         }
@@ -21,6 +25,8 @@ impl<'a, A, C> Iterator for PkgNames<A, C> where A: Iterator<Item=&'a str>, C: I
 /// Packages from a custom repo.
 #[derive(Debug, Eq, Clone, PartialEq, Ord, PartialOrd, Hash)]
 pub struct CustomPackages {
+    /// the repo the package came from.
+    pub repo: String,
     /// The srcinfo of the pkgbase.
     pub srcinfo: Box<srcinfo::Srcinfo>,
     /// The pkgs from the srcinfo to install.
@@ -147,11 +153,12 @@ impl Base {
     }
 
     /// Iterator of package names in this base.
-    pub fn packages(&self) -> impl Iterator<Item=&str> {
+    pub fn packages(&self) -> impl Iterator<Item = &str> {
         match self {
             Base::Aur(base) => PkgNames::Aur(base.pkgs.iter().map(|p| p.pkg.name.as_str())),
-            Base::Custom(base) => PkgNames::Custom(base.pkgs.iter().map(|p| p.pkg.pkgname.as_str())),
+            Base::Custom(base) => {
+                PkgNames::Custom(base.pkgs.iter().map(|p| p.pkg.pkgname.as_str()))
+            }
         }
     }
 }
-

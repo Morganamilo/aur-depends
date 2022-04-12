@@ -1,4 +1,4 @@
-use crate::{satisfies::Satisfies, Base, CustomPackages};
+use crate::{satisfies::Satisfies, Base};
 
 use std::collections::{HashMap, HashSet};
 
@@ -43,10 +43,7 @@ impl<'a> Actions<'a> {
             .iter()
             .filter_map(|b| match b {
                 Base::Aur(_) => None,
-                Base::Custom(CustomPackages {
-                    srcinfo: base,
-                    pkgs,
-                }) => Some((base, pkgs)),
+                Base::Custom(base) => Some((&base.srcinfo, &base.pkgs)),
             })
             .flat_map(|(base, pkgs)| pkgs.iter().map(move |p| (base.as_ref(), p)))
     }
@@ -90,7 +87,6 @@ pub type CustomPackage = Package<srcinfo::Package>;
 
 /// Wrapper around alpm::Package for extra metadata.
 pub type RepoPackage<'a> = Package<alpm::Package<'a>>;
-
 
 /// A conflict
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
