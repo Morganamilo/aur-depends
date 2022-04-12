@@ -27,7 +27,7 @@ pub struct Actions<'a> {
 }
 
 impl<'a> Actions<'a> {
-    /// An iterator over each individual package in self.build.
+    /// An iterator over each AUR package in self.build.
     pub fn iter_aur_pkgs(&self) -> impl Iterator<Item = &AurPackage> {
         self.build
             .iter()
@@ -38,7 +38,7 @@ impl<'a> Actions<'a> {
             .flatten()
     }
 
-    /// An iterator over each individual package in self.build.
+    /// An iterator over each custom package in self.build.
     pub fn iter_custom_pkgs(&self) -> impl Iterator<Item = (&srcinfo::Srcinfo, &CustomPackage)> {
         self.build
             .iter()
