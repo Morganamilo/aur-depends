@@ -6,7 +6,7 @@ pub enum Error {
     /// An error occurred in the alpm crate.
     Alpm(alpm::Error),
     /// An error occurred in the rua crate.
-    Raur(Box<dyn std::error::Error>),
+    Raur(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl From<alpm::Error> for Error {

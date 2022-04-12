@@ -230,7 +230,7 @@ pub struct Resolver<'a, 'b, H = raur::Handle> {
     aur_namespace: Option<String>,
 }
 
-impl<'a, 'b, E: std::error::Error + Sync + 'static, H: Raur<Err = E> + Sync> Resolver<'a, 'b, H> {
+impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sync> Resolver<'a, 'b, H> {
     /// Create a new Resolver
     pub fn new(
         alpm: &'a Alpm,
