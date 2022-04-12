@@ -666,10 +666,8 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         }
 
         let is_make = make.contains(&aur_pkg);
-        self.stack.push(Want {
-            pkg: pkg.name.clone(),
-            dep: aur_pkg.to_string(),
-        });
+        self.stack
+            .push(new_want(pkg.name.to_string(), aur_pkg.to_string()));
         self.resolve_aur_pkg_deps(targs, AurOrCustomPackage::Aur(&*pkg), is_make)?;
         self.stack.pop().unwrap();
 
@@ -741,10 +739,10 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
         let base = base.clone();
         let pkg = pkg.clone();
         let is_make = make.contains(&custom_pkg.pkg);
-        self.stack.push(Want {
-            pkg: pkg.pkgname.clone(),
-            dep: custom_pkg.to_string(),
-        });
+        self.stack.push(new_want(
+            pkg.pkgname.to_string(),
+            custom_pkg.pkg.to_string(),
+        ));
         self.resolve_aur_pkg_deps(targs, AurOrCustomPackage::Custom(&base, &pkg), is_make)?;
         self.stack.pop().unwrap();
 
@@ -870,10 +868,7 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                 if !is_aur_targ {
                     let dep = dep.to_string();
                     if let Some(pkg) = self.find_repo_satisfier(&dep) {
-                        self.stack.push(Want {
-                            pkg: pkg.name().to_string(),
-                            dep,
-                        });
+                        self.stack.push(new_want(pkg.name().to_string(), dep));
                         self.resolve_repo_pkg(pkg, false, true)?;
                         self.stack.pop().unwrap();
                         continue;
@@ -884,10 +879,8 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                 if let Some((base, pkg)) = self.find_custom_repo_dep(None, &dep) {
                     let base = base.clone();
                     let pkg = pkg.clone();
-                    self.stack.push(Want {
-                        pkg: pkg.pkgname.clone(),
-                        dep: dep.to_string(),
-                    });
+                    self.stack
+                        .push(new_want(pkg.pkgname.to_string(), dep.to_string()));
                     self.resolve_aur_pkg_deps(
                         targs,
                         AurOrCustomPackage::Custom(&base, &pkg),
@@ -927,10 +920,8 @@ impl<'a, 'b, E: std::error::Error + 'static, H: Raur<Err = E> + Sync> Resolver<'
                     continue;
                 };
 
-                self.stack.push(Want {
-                    pkg: sat_pkg.name.clone(),
-                    dep: dep.to_string(),
-                });
+                self.stack
+                    .push(new_want(sat_pkg.name.to_string(), dep.to_string()));
                 self.resolve_aur_pkg_deps(targs, AurOrCustomPackage::Aur(&*sat_pkg), true)?;
                 self.stack.pop();
 
@@ -1512,6 +1503,13 @@ fn is_ver_char(c: char) -> bool {
 
 fn split_pkgname(c: char) -> bool {
     matches!(c, '-' | '_' | '>')
+}
+
+fn new_want(pkg: String, dep: String) -> Want {
+    Want {
+        dep: (pkg != dep).then(|| dep),
+        pkg,
+    }
 }
 
 #[cfg(test)]

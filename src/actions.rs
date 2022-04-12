@@ -242,8 +242,9 @@ pub struct AurUpdates<'a> {
 pub struct Want {
     /// The name of the package
     pub pkg: String,
-    /// The dep string that pulled in the package.
-    pub dep: String,
+    /// The dep string that pulled in the package. If it was different
+    /// from the package name.
+    pub dep: Option<String>,
 }
 
 /// A package that could not be resolved.
