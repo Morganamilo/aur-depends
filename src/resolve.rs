@@ -1,6 +1,7 @@
 use crate::actions::{
-    Actions, AurPackage, AurUpdate, AurUpdates, Base, Missing, RepoPackage, Unneeded, Want,
+    Actions, AurPackage, AurUpdate, AurUpdates, Missing, RepoPackage, Unneeded, Want,
 };
+use crate::base::Base;
 use crate::repo::Repo;
 use crate::satisfies::{satisfies_provide, Satisfies};
 use crate::{AurBase, CustomPackage, CustomPackages, Error};

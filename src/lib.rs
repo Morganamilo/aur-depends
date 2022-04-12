@@ -13,7 +13,9 @@ mod resolve;
 mod satisfies;
 #[cfg(test)]
 mod tests;
+mod base;
 
 pub use crate::actions::*;
 pub use crate::error::*;
+pub use crate::base::*;
 pub use crate::resolve::*;
