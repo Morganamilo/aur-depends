@@ -161,4 +161,20 @@ impl Base {
             }
         }
     }
+
+    /// Are any packages in this base make only.
+    pub fn make(&self) -> bool {
+        match self {
+            Base::Aur(a) => a.pkgs.iter().any(|p| p.make),
+            Base::Custom(c) => c.pkgs.iter().any(|p| p.make),
+        }
+    }
+
+    /// Are any packages in this base targets.
+    pub fn target(&self) -> bool {
+        match self {
+            Base::Aur(a) => a.pkgs.iter().any(|p| p.target),
+            Base::Custom(c) => c.pkgs.iter().any(|p| p.target),
+        }
+    }
 }
