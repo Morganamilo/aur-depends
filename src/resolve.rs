@@ -320,7 +320,12 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     }
 
     /// Getter for the aur cache
-    pub fn cache(&mut self) -> &mut Cache {
+    pub fn get_cache(&self) -> &Cache {
+        self.cache
+    }
+
+    /// Mut getter for the aur cache
+    pub fn get_cache_mut(&mut self) -> &mut Cache {
         self.cache
     }
 
