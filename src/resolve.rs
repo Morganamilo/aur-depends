@@ -236,13 +236,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     Resolver<'a, 'b, H>
 {
     /// Create a new Resolver
-    pub fn new(
-        alpm: &'a Alpm,
-        repos: Vec<Repo>,
-        cache: &'b mut Cache,
-        raur: &'b H,
-        flags: Flags,
-    ) -> Self {
+    pub fn new(alpm: &'a Alpm, cache: &'b mut Cache, raur: &'b H, flags: Flags) -> Self {
         let actions = Actions {
             alpm,
             missing: Vec::new(),
@@ -253,7 +247,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
         Resolver {
             alpm,
-            repos,
+            repos: Vec::new(),
             resolved: HashSet::new(),
             cache,
             stack: Vec::new(),
@@ -316,6 +310,12 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     /// Causes `<name>/foo` to mean from the AUR, instead of a repo named `<name>`.
     pub fn custom_aur_namespace(mut self, name: Option<String>) -> Self {
         self.aur_namespace = name;
+        self
+    }
+
+    /// Set the custom repos to use.
+    pub fn repos(mut self, repos: Vec<Repo>) -> Self {
+        self.repos = repos;
         self
     }
 
@@ -1223,8 +1223,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
         let pkgs = custom_pkgs
             .iter()
-            .map(|p| self.find_aur_deps_of_custom(*p))
-            .flatten()
+            .flat_map(|p| self.find_aur_deps_of_custom(*p))
             .chain(pkgs.iter().map(|p| p.as_ref().to_string()))
             .collect::<Vec<_>>();
 

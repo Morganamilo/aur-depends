@@ -22,9 +22,8 @@ impl Raur for MockRaur {
             .filter(|p| {
                 p.name.contains(query.as_ref())
                     || p.description
-                        .as_ref()
-                        .map(|s| s.as_str())
-                        .unwrap_or_else(|| "")
+                        .as_deref()
+                        .unwrap_or_default()
                         .contains(query.as_ref())
             })
             .cloned()
