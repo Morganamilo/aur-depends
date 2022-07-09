@@ -615,6 +615,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         }
 
         debug!("Caching done, building tree");
+        debug!("cache: {:#?}", self.cache);
         debug!("targets: {:?}", aur_targets);
 
         for &pkg in &custom_repo_targets {
@@ -1214,23 +1215,22 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         custom_pkgs: &[Targ<'_>],
         target: bool,
     ) -> Result<Vec<String>, Error> {
-        if pkgs.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Compilier Bug?
-        /*if log_enabled!(Debug) {
-            debug!(
-                "cache_aur_pkgs_recursive {:?}",
-                pkgs.iter().map(|p| p.as_ref()).collect::<Vec<_>>()
-            )
-        }*/
-
         let pkgs = custom_pkgs
             .iter()
             .flat_map(|p| self.find_aur_deps_of_custom(*p))
             .chain(pkgs.iter().map(|p| p.as_ref().to_string()))
             .collect::<Vec<_>>();
+
+        if pkgs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        if log_enabled!(Debug) {
+            debug!(
+                "cache_aur_pkgs_recursive {:?}",
+                pkgs.iter().collect::<Vec<_>>()
+            )
+        }
 
         let pkgs = self.cache_aur_pkgs(&pkgs, target).await?;
         if self.flags.contains(Flags::NO_DEPS) {
@@ -1581,7 +1581,8 @@ mod tests {
             pkgs: vec![srcinfo::Srcinfo::parse_file("tests/srcinfo/custom.SRCINFO").unwrap()],
         }];
 
-        let handle = Resolver::new(&alpm, repo, &mut cache, &raur, flags)
+        let handle = Resolver::new(&alpm, &mut cache, &raur, flags)
+            .repos(repo)
             .aur_namespace(true)
             .provider_callback(|_, pkgs| {
                 debug!("provider choice: {:?}", pkgs);
@@ -1757,7 +1758,7 @@ mod tests {
         let alpm = alpm();
         let mut cache = HashSet::new();
 
-        let mut handle = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::new());
+        let mut handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
         handle
             .cache_aur_pkgs_recursive(&["ros-melodic-desktop-full"], &[], true)
             .await
@@ -1915,7 +1916,7 @@ mod tests {
         let alpm = alpm();
         let raur = raur();
         let mut cache = HashSet::new();
-        let handle = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::new());
+        let handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
         let actions = handle
             .resolve_targets(&["yay", "yay-git", "yay-bin"])
             .await
@@ -1940,7 +1941,7 @@ mod tests {
         let alpm = alpm();
         let raur = raur();
         let mut cache = HashSet::new();
-        let handle = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::new());
+        let handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
         let actions = handle.resolve_targets(&["pacman-git"]).await.unwrap();
 
         let mut conflict = Conflict::new("pacman-git".into());
@@ -1954,7 +1955,7 @@ mod tests {
         let alpm = alpm();
         let raur = raur();
         let mut cache = HashSet::new();
-        let mut handle = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::new());
+        let mut handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
         let pkgs = handle.aur_updates().await.unwrap().updates;
         let pkgs = pkgs
             .iter()
@@ -1971,7 +1972,6 @@ mod tests {
         let mut cache = HashSet::new();
         let mut handle = Resolver::new(
             &alpm,
-            Vec::new(),
             &mut cache,
             &raur,
             Flags::new() | Flags::ENABLE_DOWNGRADE,
@@ -2048,12 +2048,10 @@ mod tests {
         let mut cache = HashSet::new();
         let flags = Flags::new() & !Flags::TARGET_PROVIDES & !Flags::MISSING_PROVIDES;
 
-        let handle = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, flags).provider_callback(
-            |_, pkgs| {
-                println!("provider choice: {:?}", pkgs);
-                0
-            },
-        );
+        let handle = Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|_, pkgs| {
+            println!("provider choice: {:?}", pkgs);
+            0
+        });
 
         let actions = handle
             .resolve_targets(&["ros-melodic-desktop-full"])
