@@ -218,7 +218,7 @@ impl<'a> AurOrCustomPackage<'a> {
 #[derive(Debug)]
 pub struct Resolver<'a, 'b, H = raur::Handle> {
     alpm: &'a Alpm,
-    repos: Vec<Repo>,
+    repos: &'a [Repo],
     resolved: HashSet<String>,
     cache: &'b mut Cache,
     stack: Vec<DepMissing>,
@@ -247,7 +247,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
         Resolver {
             alpm,
-            repos: Vec::new(),
+            repos: &[],
             resolved: HashSet::new(),
             cache,
             stack: Vec::new(),
@@ -314,7 +314,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     }
 
     /// Set the custom repos to use.
-    pub fn repos(mut self, repos: Vec<Repo>) -> Self {
+    pub fn repos(mut self, repos: &'a [Repo]) -> Self {
         self.repos = repos;
         self
     }
@@ -561,7 +561,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 }
             }
 
-            for repo in &self.repos {
+            for repo in self.repos {
                 if pkg.repo.is_some() && pkg.repo != Some(repo.name.as_str()) {
                     continue;
                 }
@@ -959,7 +959,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         repo_targ: Option<&str>,
         dep: &Depend,
     ) -> Option<(&str, &srcinfo::Srcinfo, &srcinfo::Package)> {
-        for repo in &self.repos {
+        for repo in self.repos {
             if repo_targ.is_some() && Some(repo.name.as_str()) != repo_targ {
                 continue;
             }
@@ -1582,7 +1582,7 @@ mod tests {
         }];
 
         let handle = Resolver::new(&alpm, &mut cache, &raur, flags)
-            .repos(repo)
+            .repos(&repo)
             .aur_namespace(true)
             .provider_callback(|_, pkgs| {
                 debug!("provider choice: {:?}", pkgs);
