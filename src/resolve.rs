@@ -1,5 +1,5 @@
 use crate::actions::{
-    Actions, AurPackage, AurUpdate, AurUpdates, Missing, RepoPackage, Unneeded, Want,
+    Actions, AurPackage, AurUpdate, AurUpdates, DepMissing, Missing, RepoPackage, Unneeded,
 };
 use crate::base::Base;
 use crate::repo::Repo;
@@ -221,7 +221,7 @@ pub struct Resolver<'a, 'b, H = raur::Handle> {
     repos: Vec<Repo>,
     resolved: HashSet<String>,
     cache: &'b mut Cache,
-    stack: Vec<Want>,
+    stack: Vec<DepMissing>,
     raur: &'b H,
     actions: Actions<'a>,
     seen: HashSet<String>,
@@ -1521,8 +1521,8 @@ fn split_pkgname(c: char) -> bool {
     matches!(c, '-' | '_' | '>')
 }
 
-fn new_want(pkg: String, dep: String) -> Want {
-    Want {
+fn new_want(pkg: String, dep: String) -> DepMissing {
+    DepMissing {
         dep: (pkg != dep).then(|| dep),
         pkg,
     }

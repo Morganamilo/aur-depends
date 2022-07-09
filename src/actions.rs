@@ -149,7 +149,7 @@ pub struct AurUpdates<'a> {
 
 /// Describes a package in the package stack.
 #[derive(Debug, Clone, Default)]
-pub struct Want {
+pub struct DepMissing {
     /// The name of the package
     pub pkg: String,
     /// The dep string that pulled in the package. If it was different
@@ -163,7 +163,7 @@ pub struct Missing {
     /// The Dependency we failed to satisfy.
     pub dep: String,
     /// The dependency path leadsing to pkg.
-    pub stack: Vec<Want>,
+    pub stack: Vec<DepMissing>,
 }
 
 impl<'a> Actions<'a> {
