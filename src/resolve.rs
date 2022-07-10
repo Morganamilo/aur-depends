@@ -594,12 +594,10 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             }
 
             for repo in self.repos {
-                if pkg.repo.is_some() && pkg.repo != Some(repo.name.as_str()) {
-                    continue;
+                if pkg.repo == Some(repo.name.as_str()) {
+                    custom_repo_targets.push(pkg);
+                    continue 'deps;
                 }
-
-                custom_repo_targets.push(pkg);
-                continue 'deps;
             }
 
             if self.flags.contains(Flags::NATIVE_REPO) || !is_target {
