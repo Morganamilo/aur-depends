@@ -530,6 +530,15 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 continue;
             }
 
+            for repo in self.repos {
+                if pkg.repo.is_some() && pkg.repo != Some(repo.name.as_str()) {
+                    continue;
+                }
+
+                custom_repo_targets.push(pkg);
+                continue 'deps;
+            }
+
             if self.flags.contains(Flags::NATIVE_REPO) || !is_target {
                 if let Some(alpm_pkg) = self.find_repo_satisfier(pkg.pkg) {
                     repo_targets.push((pkg, alpm_pkg));
