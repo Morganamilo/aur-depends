@@ -4,14 +4,15 @@ use crate::actions::{
 use crate::base::Base;
 use crate::repo::Repo;
 use crate::satisfies::{satisfies_provide, Satisfies};
-use crate::{AurBase, CustomPackage, CustomPackages, Error};
-use bitflags::bitflags;
+use crate::{AurBase, CustomPackage, CustomPackages, CustomUpdate, CustomUpdates, Error};
 
-use std::collections::HashSet;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use alpm::{Alpm, Db, Dep, Depend, Version};
 use alpm_utils::{AsTarg, DbListExt, Targ};
+use bitflags::bitflags;
 use log::Level::Debug;
 use log::{debug, log_enabled};
 use raur::{ArcPackage, Cache, Raur, SearchBy};
@@ -366,6 +367,13 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             .filter(|p| self.alpm.syncdbs().pkg(p.name()).is_err())
             .collect::<Vec<_>>();
 
+        let customs = self
+            .repos
+            .iter()
+            .flat_map(|r| &r.pkgs)
+            .flat_map(|p| p.names())
+            .collect::<HashSet<_>>();
+
         let local_pkg_names = local_pkgs.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
         self.raur
             .cache_info(self.cache, &local_pkg_names)
@@ -398,7 +406,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
                         return Some(up);
                     }
-                } else {
+                } else if !customs.contains(local_pkg.name()) {
                     missing.push(local_pkg);
                 }
 
@@ -421,6 +429,12 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     ) -> Result<AurUpdates<'a>, Error> {
         let mut dbs = self.alpm.syncdbs().to_list_mut();
         dbs.retain(|db| repos.iter().any(|repo| repo.as_ref() == db.name()));
+        let customs = self
+            .repos
+            .iter()
+            .flat_map(|r| &r.pkgs)
+            .flat_map(|p| p.names())
+            .collect::<HashSet<_>>();
 
         let all_pkgs = dbs
             .iter()
@@ -463,7 +477,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
                             return Some(up);
                         }
-                    } else {
+                    } else if !customs.contains(local_pkg.name()) {
                         missing.push(local_pkg);
                     }
 
@@ -482,6 +496,55 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             ignored,
         };
 
+        Ok(updates)
+    }
+
+    /// Fetch updates from custom repo.
+    pub fn custom_updates(&mut self) -> Result<CustomUpdates<'a>, Error> {
+        let mut updates = HashMap::new();
+        let mut ignored = Vec::new();
+
+        for repo in self.repos {
+            for base in &repo.pkgs {
+                for pkg in &base.pkgs {
+                    let entry = updates.entry(pkg.pkgname.clone());
+                    let entry = match entry {
+                        Entry::Occupied(_) => continue,
+                        Entry::Vacant(v) => v,
+                    };
+
+                    if let Ok(local_pkg) = self.alpm.localdb().pkg(pkg.pkgname.as_str()) {
+                        let should_upgrade = if self.flags.contains(Flags::ENABLE_DOWNGRADE) {
+                            Version::new(base.version().as_str()) != local_pkg.version()
+                        } else {
+                            Version::new(base.version().as_str()) > local_pkg.version()
+                        };
+
+                        if should_upgrade {
+                            let should_ignore = local_pkg.should_ignore();
+
+                            let up = CustomUpdate {
+                                local: local_pkg,
+                                repo: repo.name.clone(),
+                                remote_srcinfo: base,
+                                remote_pkg: pkg,
+                            };
+                            if should_ignore {
+                                ignored.push(up);
+                                continue;
+                            }
+
+                            entry.insert(up);
+                        }
+                    }
+                }
+            }
+        }
+
+        let updates = CustomUpdates {
+            updates: updates.into_values().collect(),
+            ignored,
+        };
         Ok(updates)
     }
 

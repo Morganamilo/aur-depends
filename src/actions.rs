@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use alpm::{Alpm, Dep, DepMod, Depend};
 use raur::ArcPackage;
+use srcinfo::Srcinfo;
 
 type ConflictMap = HashMap<String, Conflict>;
 
@@ -136,6 +137,19 @@ pub struct AurUpdate<'a> {
     pub remote: ArcPackage,
 }
 
+/// An custom package that should be updated.
+#[derive(Debug)]
+pub struct CustomUpdate<'a> {
+    /// The local package.
+    pub local: alpm::Package<'a>,
+    /// The custom repo the package belongs to.
+    pub repo: String,
+    /// The custom package base srcinfo.
+    pub remote_srcinfo: &'a Srcinfo,
+    /// The custom package base package,
+    pub remote_pkg: &'a srcinfo::Package,
+}
+
 /// Collection of AUR updates and missing packages
 #[derive(Debug, Default)]
 pub struct AurUpdates<'a> {
@@ -145,6 +159,15 @@ pub struct AurUpdates<'a> {
     pub missing: Vec<alpm::Package<'a>>,
     /// Packages that matched ignore pkg/group
     pub ignored: Vec<AurUpdate<'a>>,
+}
+
+/// Collection of custom updates and missing packages
+#[derive(Debug, Default)]
+pub struct CustomUpdates<'a> {
+    /// The updates.
+    pub updates: Vec<CustomUpdate<'a>>,
+    /// Packages that matched ignore pkg/group
+    pub ignored: Vec<CustomUpdate<'a>>,
 }
 
 /// Describes a package in the package stack.
