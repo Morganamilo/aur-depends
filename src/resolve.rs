@@ -1163,7 +1163,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
         debug!("cache args: {:?}\n", to_info);
         for pkg in pkgs {
-            let pkg = pkg.as_ref();
+            let pkg = pkg.as_ref().split(is_ver_char).next().unwrap();
 
             // Optimization, may break with alpm repos disabled
             // for example, trying to resolve "pacman" with aur only should pull in
