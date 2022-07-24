@@ -31,6 +31,8 @@ pub struct CustomPackages {
     pub srcinfo: Box<srcinfo::Srcinfo>,
     /// The pkgs from the srcinfo to install.
     pub pkgs: Vec<CustomPackage>,
+    /// Should the package be built.
+    pub build: bool,
 }
 
 /// Describes an AUR package base.
@@ -38,6 +40,8 @@ pub struct CustomPackages {
 pub struct AurBase {
     /// List of packages belonging to the package base.
     pub pkgs: Vec<AurPackage>,
+    /// Should the package be built.
+    pub build: bool,
 }
 
 /// A package base.
@@ -175,6 +179,14 @@ impl Base {
         match self {
             Base::Aur(a) => a.pkgs.iter().any(|p| p.target),
             Base::Custom(c) => c.pkgs.iter().any(|p| p.target),
+        }
+    }
+
+    /// Should the packages be built
+    pub fn build(&self) -> bool {
+        match self {
+            Base::Aur(a) => a.build,
+            Base::Custom(c) => c.build,
         }
     }
 }

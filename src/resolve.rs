@@ -749,7 +749,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         let is_make = make.contains(&aur_pkg);
         self.stack
             .push(new_want(pkg.name.to_string(), aur_pkg.to_string()));
-        self.resolve_aur_pkg_deps(targs, AurOrCustomPackage::Aur(&*pkg), is_make)?;
+        self.resolve_aur_pkg_deps(targs, AurOrCustomPackage::Aur(&pkg), is_make)?;
         self.stack.pop().unwrap();
 
         if self.actions.iter_aur_pkgs().any(|p| p.pkg.name == pkg.name) {
@@ -1008,7 +1008,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
                 self.stack
                     .push(new_want(sat_pkg.name.to_string(), dep.to_string()));
-                self.resolve_aur_pkg_deps(targs, AurOrCustomPackage::Aur(&*sat_pkg), true)?;
+                self.resolve_aur_pkg_deps(targs, AurOrCustomPackage::Aur(&sat_pkg), true)?;
                 self.stack.pop();
 
                 let p = AurPackage {
@@ -1438,28 +1438,47 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
     fn push_aur_build(&mut self, pkgbase: &str, pkg: AurPackage) {
         debug!("pushing to build: {}", pkg.pkg.name);
-        for base in &mut self.actions.build {
+        let mut build = true;
+
+        if let Some(Base::Aur(base)) = self.actions.build.last_mut() {
+            if base.package_base() == pkgbase {
+                base.pkgs.push(pkg);
+                return;
+            }
+        }
+
+        for base in self.actions.build.iter_mut() {
             if let Base::Aur(pkgs) = base {
                 if pkgs.pkgs[0].pkg.package_base == pkgbase {
-                    pkgs.pkgs.push(pkg);
-                    return;
+                    build = false;
+                    break;
                 }
             }
         }
 
-        self.actions
-            .build
-            .push(Base::Aur(AurBase { pkgs: vec![pkg] }));
+        self.actions.build.push(Base::Aur(AurBase {
+            pkgs: vec![pkg],
+            build,
+        }));
     }
 
     // TODO: multiple packages may have same pkgbase
     fn push_custom_build(&mut self, repo: String, base: srcinfo::Srcinfo, pkg: CustomPackage) {
         debug!("pushing to build: {}", pkg.pkg.pkgname);
-        for build in &mut self.actions.build {
+        let mut b = true;
+
+        if let Some(Base::Custom(b)) = self.actions.build.last_mut() {
+            if b.package_base() == base.base.pkgbase {
+                b.pkgs.push(pkg);
+                return;
+            }
+        }
+
+        for build in self.actions.build.iter_mut() {
             if let Base::Custom(pkgs) = build {
                 if pkgs.srcinfo.base.pkgbase == base.base.pkgbase {
-                    pkgs.pkgs.push(pkg);
-                    return;
+                    b = false;
+                    break;
                 }
             }
         }
@@ -1468,6 +1487,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             repo,
             srcinfo: Box::new(base),
             pkgs: vec![pkg],
+            build: b,
         }));
     }
 
