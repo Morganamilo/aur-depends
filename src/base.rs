@@ -55,7 +55,7 @@ impl Display for AurBase {
         let pkgbase = self.package_base();
         let ver = self.version();
 
-        let name = self.package_base();
+        let name = &self.pkgs[0].pkg.name;
         let len = self.pkgs.len();
 
         if len == 1 && name == pkgbase {
