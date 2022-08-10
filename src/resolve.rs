@@ -50,6 +50,8 @@ bitflags! {
         ///
         /// This means that we need to still build packages even if they are already installed.
         const LOCAL_REPO = 1 << 14;
+        /// Don't skip already installed AUR dependencies.
+        const RESOLVE_INSTALLED_AUR_DEPS = 1 << 15;
     }
 }
 
@@ -1047,6 +1049,9 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
     fn should_skip_aur_pkg(&self, dep: &Depend, is_target: bool) -> bool {
         if !is_target {
+            if self.flags.contains(Flags::RESOLVE_INSTALLED_AUR_DEPS) {
+                return false;
+            }
             if !self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(dep) {
                 return true;
             }
@@ -1260,12 +1265,13 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
             for pkg in deps {
                 let dep = Depend::new(pkg);
-                if (!self.flags.contains(Flags::LOCAL_REPO)
+                if (!self.flags.contains(Flags::RESOLVE_INSTALLED_AUR_DEPS)
+                    && (!self.flags.contains(Flags::LOCAL_REPO)
                     && self.find_repo_satisfier_silent(dep.to_string()).is_some()
                     && self.satisfied_local(&dep))
                     || self.find_repo_satisfier_silent(&pkg).is_some()
                     || self.resolved.contains(&dep.to_string())
-                    || self.assume_installed(&dep)
+                    || self.assume_installed(&dep))
                 {
                     continue;
                 }
@@ -1324,12 +1330,13 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             for pkg in depends {
                 let dep = Depend::new(pkg.as_str());
 
-                if (!self.flags.contains(Flags::LOCAL_REPO)
+                if (!self.flags.contains(Flags::RESOLVE_INSTALLED_AUR_DEPS)
+                    && (!self.flags.contains(Flags::LOCAL_REPO)
                     && self.find_repo_satisfier_silent(dep.to_string()).is_some()
                     && self.satisfied_local(&dep))
                     || self.find_repo_satisfier_silent(&pkg).is_some()
                     || self.resolved.contains(&dep.to_string())
-                    || self.assume_installed(&dep)
+                    || self.assume_installed(&dep))
                 {
                     if log_enabled!(Debug) {
                         debug!(
