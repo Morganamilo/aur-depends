@@ -3306,5 +3306,7 @@ pub fn raur() -> impl Raur<Err = raur::Error> {
     raur.pkg("c2").depend("c3");
     raur.pkg("c3");
 
+    raur.pkg("wants-pacaur").depend("pacaur");
+
     raur
 }
