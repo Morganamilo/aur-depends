@@ -13,7 +13,7 @@ keywords = ["archlinux", "pkgbuild", "arch", "aur"]
 exclude = ["tests"]
 
 [package.metadata.docs.rs]
-features = [ "docs-rs" ]
+features = ["docs-rs"]
 
 [dependencies]
 alpm = "2.2.1"
@@ -25,7 +25,7 @@ srcinfo = "1.0.0"
 
 [dev-dependencies]
 async-trait = "0.1.53"
-simplelog = "0.11.2"
+simplelog = "0.12.0"
 tokio = { version = "1.17.0", features = ["macros", "rt"] }
 
 [features]
