@@ -1,6 +1,6 @@
 use crate::{AurPackage, CustomPackage};
 
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, Formatter, Write};
 
 enum PkgNames<A, C> {
     Aur(A),
@@ -56,45 +56,15 @@ pub enum Base {
 
 impl Display for AurBase {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let pkgbase = self.package_base();
-        let ver = self.version();
-
-        let name = &self.pkgs[0].pkg.name;
-        let len = self.pkgs.len();
-
-        if len == 1 && name == pkgbase {
-            write!(f, "{}-{}", pkgbase, ver)
-        } else {
-            write!(f, "{}-{} ({}", self.package_base(), self.version(), name)?;
-            for pkg in self.pkgs.iter().skip(1) {
-                f.write_str(" ")?;
-                f.write_str(&pkg.pkg.name)?;
-            }
-            f.write_str(")")?;
-            Ok(())
-        }
+        let pkgs = self.pkgs.iter().map(|p| p.pkg.name.as_str());
+        Base::write_base(f, &self.package_base(), &self.version(), pkgs)
     }
 }
 
 impl Display for CustomPackages {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let pkgbase = self.package_base();
-        let ver = self.version();
-
-        let name = self.package_base();
-        let len = self.pkgs.len();
-
-        if len == 1 && name == pkgbase {
-            write!(f, "{}-{}", pkgbase, ver)
-        } else {
-            write!(f, "{}-{} ({}", self.package_base(), self.version(), name)?;
-            for pkg in self.pkgs.iter().skip(1) {
-                f.write_str(" ")?;
-                f.write_str(&pkg.pkg.pkgname)?;
-            }
-            f.write_str(")")?;
-            Ok(())
-        }
+        let pkgs = self.pkgs.iter().map(|p| p.pkg.pkgname.as_str());
+        Base::write_base(f, self.package_base(), &self.version(), pkgs)
     }
 }
 
@@ -187,6 +157,32 @@ impl Base {
         match self {
             Base::Aur(a) => a.build,
             Base::Custom(c) => c.build,
+        }
+    }
+
+    /// Formats a base into the format:
+    /// pkgname-ver
+    /// or, if there are multiple packages:
+    /// pkgbase-ver (pkg1 pkg2 pkg2)
+    pub fn write_base<'a, W: Write, I: IntoIterator<Item = &'a str>>(
+        mut writer: W,
+        pkgbase: &str,
+        ver: &str,
+        pkgs: I,
+    ) -> std::fmt::Result {
+        let mut pkgs = pkgs.into_iter().peekable();
+        let name = pkgs.next().unwrap_or("");
+
+        if pkgs.peek().is_none() && name == pkgbase {
+            write!(writer, "{}-{}", pkgbase, ver)
+        } else {
+            write!(writer, "{}-{} ({}", pkgbase, ver, name)?;
+            for pkg in pkgs {
+                writer.write_str(" ")?;
+                writer.write_str(pkg.as_ref())?;
+            }
+            writer.write_str(")")?;
+            Ok(())
         }
     }
 }
