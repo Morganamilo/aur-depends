@@ -185,4 +185,12 @@ impl Base {
             Ok(())
         }
     }
+
+    /// True if the package base contains a single package
+    /// with the same name as the pkgbase.
+    pub fn base_is_pkg<'a, I: IntoIterator<Item = &'a str>>(pkgbase: &str, pkgs: I) -> bool {
+        let mut pkgs = pkgs.into_iter();
+        let Some(p) = pkgs.next() else { return false };
+        p == pkgbase && pkgs.next().is_none()
+    }
 }
