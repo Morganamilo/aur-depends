@@ -996,15 +996,15 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 debug!("depend: {}", dep_str);
                 let dep = Depend::new(dep_str.to_string());
 
-                if self.satisfied_build(&dep) || self.resolved.contains(&dep.to_string()) {
+                if self.assume_installed(&dep)
+                    || self.satisfied_build(&dep)
+                    || self.resolved.contains(&dep.to_string())
+                {
                     continue;
                 }
 
                 let is_aur_targ = self.dep_is_aur_targ(targs, &dep);
 
-                if self.should_skip_aur_pkg(&dep, is_aur_targ) {
-                    continue;
-                }
                 if self.satisfied_install(&dep) {
                     continue;
                 }
@@ -1012,13 +1012,19 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 self.resolved.insert(dep.to_string());
 
                 if !is_aur_targ {
-                    let dep = dep.to_string();
-                    if let Some(pkg) = self.find_repo_satisfier(&dep) {
-                        self.stack.push(new_want(pkg.name().to_string(), dep));
-                        self.resolve_repo_pkg(pkg, false, true)?;
-                        self.stack.pop().unwrap();
+                    let depstr = dep.to_string();
+                    if let Some(pkg) = self.find_repo_satisfier(&depstr) {
+                        if !self.satisfied_local(&dep) {
+                            self.stack.push(new_want(pkg.name().to_string(), depstr));
+                            self.resolve_repo_pkg(pkg, false, true)?;
+                            self.stack.pop().unwrap();
+                        }
                         continue;
                     }
+                }
+
+                if self.should_skip_aur_pkg(&dep, is_aur_targ) {
+                    continue;
                 }
 
                 if let Some((repo, base, pkg)) = self.find_custom_repo_dep(None, &dep) {
@@ -1106,24 +1112,19 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     }
 
     fn should_skip_aur_pkg(&self, dep: &Depend, is_target: bool) -> bool {
-        if !is_target {
-            if self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS)
-                && self.find_repo_satisfier_silent(dep.to_string()).is_none()
-            {
-                return false;
-            }
-            if !self.flags.contains(Flags::LOCAL_REPO) && self.satisfied_local(dep) {
-                return true;
-            }
-            if self.flags.contains(Flags::LOCAL_REPO)
-                && self.find_repo_satisfier_silent(dep.to_string()).is_some()
-                && self.satisfied_local(dep)
-            {
-                return true;
-            }
-            if self.assume_installed(dep) {
-                return true;
-            }
+        if is_target {
+            return false;
+        }
+        if self.assume_installed(dep) {
+            return true;
+        }
+        if self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS)
+            || self.flags.contains(Flags::LOCAL_REPO)
+        {
+            return false;
+        }
+        if self.satisfied_local(dep) {
+            return true;
         }
 
         false
@@ -1328,16 +1329,21 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
             for pkg in deps {
                 let dep = Depend::new(pkg);
-                if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS) {
-                    if (!self.flags.contains(Flags::LOCAL_REPO)
-                        && self.find_repo_satisfier_silent(dep.to_string()).is_some()
-                        && self.satisfied_local(&dep))
-                        || self.find_repo_satisfier_silent(&pkg).is_some()
-                        || self.resolved.contains(&dep.to_string())
-                        || self.assume_installed(&dep)
-                    {
+
+                if self.resolved.contains(&dep.to_string()) {
+                    continue;
+                }
+                if self.find_repo_satisfier_silent(&pkg).is_some() {
+                    continue;
+                }
+                if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS)
+                    && !self.flags.contains(Flags::LOCAL_REPO)
+                {
+                    if self.satisfied_local(&dep) {
                         continue;
                     }
+                } else if self.assume_installed(&dep) {
+                    continue;
                 }
 
                 new_resolved.insert(dep.to_string());
@@ -1394,27 +1400,20 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             for pkg in depends {
                 let dep = Depend::new(pkg.as_str());
 
-                if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS) {
-                    if (!self.flags.contains(Flags::LOCAL_REPO)
-                        && self.find_repo_satisfier_silent(dep.to_string()).is_some()
-                        && self.satisfied_local(&dep))
-                        || self.find_repo_satisfier_silent(&pkg).is_some()
-                        || self.resolved.contains(&dep.to_string())
-                        || self.assume_installed(&dep)
-                    {
-                        if log_enabled!(Debug) {
-                            debug!(
-                                "{} is satisfied so skipping: local={} repo={} resolved={}",
-                                dep.to_string(),
-                                self.flags.contains(Flags::LOCAL_REPO)
-                                    && self.satisfied_local(&dep),
-                                self.find_repo_satisfier_silent(&pkg).is_some(),
-                                self.resolved.contains(&dep.to_string())
-                            );
-                        }
-
+                if self.resolved.contains(&dep.to_string()) {
+                    continue;
+                }
+                if self.find_repo_satisfier_silent(&pkg).is_some() {
+                    continue;
+                }
+                if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS)
+                    && !self.flags.contains(Flags::LOCAL_REPO)
+                {
+                    if self.satisfied_local(&dep) {
                         continue;
                     }
+                } else if self.assume_installed(&dep) {
+                    continue;
                 }
 
                 self.resolved.insert(dep.to_string());
