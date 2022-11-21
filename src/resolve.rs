@@ -737,7 +737,11 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             }
 
             let is_make = make.contains(&pkg.pkg);
+
+            self.stack
+                .push(new_want(alpm_pkg.name().to_string(), pkg.pkg.to_string()));
             self.resolve_repo_pkg(alpm_pkg, is_target, is_make)?;
+            self.stack.pop().unwrap();
         }
 
         debug!("Caching done, building tree");
@@ -1145,11 +1149,14 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 }
 
                 if let Some(pkg) = self.find_repo_satisfier(dep.to_string()) {
+                    self.stack
+                        .push(new_want(pkg.name().to_string(), dep.to_string()));
                     self.resolve_repo_pkg(pkg, false, true)?;
+                    self.stack.pop().unwrap();
                 } else {
                     self.actions.missing.push(Missing {
                         dep: dep.to_string(),
-                        stack: Vec::new(),
+                        stack: self.stack.clone(),
                     });
                 }
             }
