@@ -30,26 +30,24 @@ bitflags! {
         const NO_DEP_VERSION = 1 << 3;
         /// Solve provides for targets.
         const TARGET_PROVIDES = 1 << 4;
+        /// Solve provides for non targets.
+        const NON_TARGET_PROVIDES = 1 << 5;
         /// Solve provides for missing packages.
-        const MISSING_PROVIDES = 1 << 5;
-        /// Solve provides in all other instances.
-        const PROVIDES = 1 << 6;
+        const MISSING_PROVIDES = 1 << 6;
+        /// Solve provides in all instances.
+        const PROVIDES = 1 << 7;
         /// Calculate which packages are only needed to build the packages.
-        const CALCULATE_MAKE = 1 << 7;
+        const CALCULATE_MAKE = 1 << 8;
         /// Solve checkdepends.
-        const CHECK_DEPENDS = 1 << 9;
+        const CHECK_DEPENDS = 1 << 10;
         /// Ignore targets that are up to date.
-        const NEEDED = 1 << 10;
+        const NEEDED = 1 << 11;
         /// Search aur for targets.
-        const AUR = 1 << 11;
+        const AUR = 1 << 12;
         /// Search alpm repos for targets.
-        const NATIVE_REPO = 1 << 12;
+        const NATIVE_REPO = 1 << 13;
         /// when fetching updates, also include packages that are older than locally installed.
-        const ENABLE_DOWNGRADE = 1 << 13;
-        /// Asume packages are going to be put in a local repo.
-        ///
-        /// This means that we need to still build packages even if they are already installed.
-        const LOCAL_REPO = 1 << 14;
+        const ENABLE_DOWNGRADE = 1 << 14;
         /// Pull in pkgbuild dependencies even if they are already satisfied.
         const RESOLVE_SATISFIED_PKGBUILDS = 1 << 15;
     }
@@ -1118,9 +1116,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         if self.assume_installed(dep) {
             return true;
         }
-        if self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS)
-            || self.flags.contains(Flags::LOCAL_REPO)
-        {
+        if self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS) {
             return false;
         }
         if self.satisfied_local(dep) {
@@ -1181,7 +1177,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         pkgs_nover.sort_unstable();
         pkgs_nover.dedup();
 
-        if (!target && self.flags.contains(Flags::PROVIDES))
+        if (self.flags.contains(Flags::PROVIDES))
             || (target && self.flags.contains(Flags::TARGET_PROVIDES))
         {
             self.cache_provides(&pkgs_nover).await
@@ -1192,7 +1188,9 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 .await
                 .map_err(|e| Error::Raur(Box::new(e)))?;
 
-            if self.flags.contains(Flags::MISSING_PROVIDES) {
+            if (self.flags.contains(Flags::PROVIDES))
+                || (self.flags.contains(Flags::MISSING_PROVIDES))
+            {
                 let missing = pkgs
                     .iter()
                     .map(|pkg| Depend::new(pkg.as_ref()))
@@ -1244,20 +1242,17 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 continue;
             }
 
-            if let Some(word) = pkg.rsplitn(2, split_pkgname).last() {
-                debug!("provide search: {} {}", pkg, word);
-                to_info.extend(
-                    self.raur
-                        .search_by(word, SearchBy::NameDesc)
-                        .await
-                        .unwrap_or_else(|e| {
-                            debug!("provide search '{}' failed: {}", word, e);
-                            Vec::new()
-                        })
-                        .into_iter()
-                        .map(|p| p.name),
-                );
-            }
+            to_info.extend(
+                self.raur
+                    .search_by(pkg, SearchBy::Provides)
+                    .await
+                    .unwrap_or_else(|e| {
+                        debug!("provide search '{}' failed: {}", pkg, e);
+                        Vec::new()
+                    })
+                    .into_iter()
+                    .map(|p| p.name),
+            );
         }
 
         to_info.sort();
@@ -1336,9 +1331,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 if self.find_repo_satisfier_silent(&pkg).is_some() {
                     continue;
                 }
-                if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS)
-                    && !self.flags.contains(Flags::LOCAL_REPO)
-                {
+                if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS) {
                     if self.satisfied_local(&dep) {
                         continue;
                     }
@@ -1406,9 +1399,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 if self.find_repo_satisfier_silent(&pkg).is_some() {
                     continue;
                 }
-                if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS)
-                    && !self.flags.contains(Flags::LOCAL_REPO)
-                {
+                if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS) {
                     if self.satisfied_local(&dep) {
                         continue;
                     }
@@ -1677,10 +1668,6 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
 fn is_ver_char(c: char) -> bool {
     matches!(c, '<' | '=' | '>')
-}
-
-fn split_pkgname(c: char) -> bool {
-    matches!(c, '-' | '_' | '>')
 }
 
 fn new_want(pkg: String, dep: String) -> DepMissing {

@@ -80,6 +80,8 @@ impl MockRaur {
             provides: vec![],
             license: vec![],
             keywords: vec![],
+            submitter: None,
+            co_maintainers: vec![],
         };
 
         self.pkgs.insert(pkg.name.clone(), pkg);
