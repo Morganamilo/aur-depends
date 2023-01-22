@@ -166,7 +166,7 @@ impl<'a> AurOrCustomPackage<'a> {
                     .iter()
                     .chain(check.into_iter().flatten())
                     .chain(&pkg.depends)
-                    .filter(|d| d.arch == None || d.arch.as_deref() == Some(arch))
+                    .filter(|d| d.arch.is_none() || d.arch.as_deref() == Some(arch))
                     .flat_map(|d| &d.vec)
                     .map(|d| d.as_str())
                     .collect()
@@ -1328,7 +1328,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 if self.resolved.contains(&dep.to_string()) {
                     continue;
                 }
-                if self.find_repo_satisfier_silent(&pkg).is_some() {
+                if self.find_repo_satisfier_silent(pkg).is_some() {
                     continue;
                 }
                 if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS) {
@@ -1396,7 +1396,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 if self.resolved.contains(&dep.to_string()) {
                     continue;
                 }
-                if self.find_repo_satisfier_silent(&pkg).is_some() {
+                if self.find_repo_satisfier_silent(pkg).is_some() {
                     continue;
                 }
                 if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS) {
@@ -1672,7 +1672,7 @@ fn is_ver_char(c: char) -> bool {
 
 fn new_want(pkg: String, dep: String) -> DepMissing {
     DepMissing {
-        dep: (pkg != dep).then(|| dep),
+        dep: (pkg != dep).then_some(dep),
         pkg,
     }
 }
@@ -2025,8 +2025,8 @@ mod tests {
             ..
         } = resolve(&["discord-canary"], Flags::new()).await;
 
-        println!("{:?}", build);
-        println!("{:?}", install);
+        println!("{build:?}");
+        println!("{install:?}");
 
         assert_eq!(build.len(), 3);
         assert_eq!(install.len(), 89 + 13);
@@ -2071,8 +2071,8 @@ mod tests {
             ..
         } = resolve(&["extra/xterm", "aur/xterm"], Flags::new()).await;
 
-        println!("{:#?}", install);
-        println!("{:#?}", build);
+        println!("{install:#?}");
+        println!("{build:#?}");
         assert_eq!(duplicates.len(), 1);
     }
 
@@ -2214,7 +2214,7 @@ mod tests {
         let flags = Flags::new() & !Flags::TARGET_PROVIDES & !Flags::MISSING_PROVIDES;
 
         let handle = Resolver::new(&alpm, &mut cache, &raur, flags).provider_callback(|_, pkgs| {
-            println!("provider choice: {:?}", pkgs);
+            println!("provider choice: {pkgs:?}");
             0
         });
 
@@ -2244,7 +2244,7 @@ mod tests {
         actions
             .missing
             .iter()
-            .for_each(|m| println!("missing {:?}", m));
+            .for_each(|m| println!("missing {m:?}"));
 
         actions.calculate_conflicts(true).iter().for_each(|c| {
             println!("c {}: ", c.pkg);
@@ -2271,7 +2271,7 @@ mod tests {
         actions
             .duplicate_targets()
             .iter()
-            .for_each(|p| println!("d {}", p));
+            .for_each(|p| println!("d {p}"));
 
         println!(
             "build: {}",

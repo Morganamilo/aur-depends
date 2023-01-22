@@ -19,7 +19,7 @@ impl Satisfies for raur::Package {
             provides,
             nover,
         )
-        .then(|| self.name.as_str())
+        .then_some(self.name.as_str())
     }
 }
 
@@ -52,7 +52,7 @@ impl Satisfies for srcinfo::Srcinfo {
                 provides,
                 nover,
             )
-            .then(|| pkg.pkgname.as_str())
+            .then_some(pkg.pkgname.as_str())
         })
     }
 }
@@ -73,7 +73,7 @@ impl Satisfies for (&srcinfo::Srcinfo, &srcinfo::Package) {
             provides,
             nover,
         )
-        .then(|| self.1.pkgname.as_str())
+        .then_some(self.1.pkgname.as_str())
     }
 }
 

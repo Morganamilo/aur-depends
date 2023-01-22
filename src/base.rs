@@ -57,7 +57,7 @@ pub enum Base {
 impl Display for AurBase {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let pkgs = self.pkgs.iter().map(|p| p.pkg.name.as_str());
-        Base::write_base(f, &self.package_base(), &self.version(), pkgs)
+        Base::write_base(f, self.package_base(), &self.version(), pkgs)
     }
 }
 
@@ -174,9 +174,9 @@ impl Base {
         let name = pkgs.next().unwrap_or("");
 
         if pkgs.peek().is_none() && name == pkgbase {
-            write!(writer, "{}-{}", pkgbase, ver)
+            write!(writer, "{pkgbase}-{ver}")
         } else {
-            write!(writer, "{}-{} ({}", pkgbase, ver, name)?;
+            write!(writer, "{pkgbase}-{ver} ({name}")?;
             for pkg in pkgs {
                 writer.write_str(" ")?;
                 writer.write_str(pkg.as_ref())?;
