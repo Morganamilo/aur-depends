@@ -42,14 +42,16 @@ bitflags! {
         const CHECK_DEPENDS = 1 << 10;
         /// Ignore targets that are up to date.
         const NEEDED = 1 << 11;
+        /// Search PKGBUILD reopos for upgrades
+        const PKGBUILDS = 1 << 12;
         /// Search aur for targets.
-        const AUR = 1 << 12;
+        const AUR = 1 << 13;
         /// Search alpm repos for targets.
-        const NATIVE_REPO = 1 << 13;
+        const NATIVE_REPO = 1 << 14;
         /// when fetching updates, also include packages that are older than locally installed.
-        const ENABLE_DOWNGRADE = 1 << 14;
+        const ENABLE_DOWNGRADE = 1 << 15;
         /// Pull in pkgbuild dependencies even if they are already satisfied.
-        const RESOLVE_SATISFIED_PKGBUILDS = 1 << 15;
+        const RESOLVE_SATISFIED_PKGBUILDS = 1 << 16;
     }
 }
 
@@ -62,6 +64,7 @@ impl Flags {
             | Flags::CHECK_DEPENDS
             | Flags::AUR
             | Flags::NATIVE_REPO
+            | Flags::PKGBUILDS
     }
 
     /// Create a new Flags with repo targets disabled
@@ -647,10 +650,12 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 continue;
             }
 
-            for repo in self.repos {
-                if pkg.repo == Some(repo.name.as_str()) {
-                    custom_repo_targets.push(pkg);
-                    continue 'deps;
+            if self.flags.contains(Flags::PKGBUILDS) || !is_target {
+                for repo in self.repos {
+                    if pkg.repo == Some(repo.name.as_str()) {
+                        custom_repo_targets.push(pkg);
+                        continue 'deps;
+                    }
                 }
             }
 
@@ -685,18 +690,20 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 }
             }
 
-            for repo in self.repos {
-                if pkg.repo.is_some() && pkg.repo != Some(repo.name.as_str()) {
-                    continue;
-                }
+            if self.flags.contains(Flags::PKGBUILDS) || !is_target {
+                for repo in self.repos {
+                    if pkg.repo.is_some() && pkg.repo != Some(repo.name.as_str()) {
+                        continue;
+                    }
 
-                for base in &repo.pkgs {
-                    if base.satisfies_dep(
-                        &Depend::new(pkg.pkg),
-                        self.flags.contains(Flags::NO_DEP_VERSION),
-                    ) {
-                        custom_repo_targets.push(pkg);
-                        continue 'deps;
+                    for base in &repo.pkgs {
+                        if base.satisfies_dep(
+                            &Depend::new(pkg.pkg),
+                            self.flags.contains(Flags::NO_DEP_VERSION),
+                        ) {
+                            custom_repo_targets.push(pkg);
+                            continue 'deps;
+                        }
                     }
                 }
             }
