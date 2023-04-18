@@ -394,8 +394,7 @@ impl<'a> Actions<'a> {
         self.check_reverse_conflicts(!makedeps, &mut conflicts);
         self.check_forward_conflicts(!makedeps, &mut conflicts);
 
-        let mut conflicts = conflicts.into_values()
-            .collect::<Vec<Conflict>>();
+        let mut conflicts = conflicts.into_values().collect::<Vec<Conflict>>();
 
         conflicts.sort();
         conflicts
@@ -416,8 +415,7 @@ impl<'a> Actions<'a> {
 
         self.check_inner_conflicts(!makedeps, &mut inner_conflicts);
 
-        let mut inner_conflicts = inner_conflicts.into_values()
-            .collect::<Vec<Conflict>>();
+        let mut inner_conflicts = inner_conflicts.into_values().collect::<Vec<Conflict>>();
 
         inner_conflicts.sort();
         inner_conflicts
