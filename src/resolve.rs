@@ -368,14 +368,8 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             .pkgs()
             .iter()
             .filter(|p| self.alpm.syncdbs().pkg(p.name()).is_err())
+            .filter(|p| !self.is_pkgbuild(p.name()))
             .collect::<Vec<_>>();
-
-        let customs = self
-            .repos
-            .iter()
-            .flat_map(|r| &r.pkgs)
-            .flat_map(|p| p.names())
-            .collect::<HashSet<_>>();
 
         let local_pkg_names = local_pkgs.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
         self.raur
@@ -409,7 +403,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
                         return Some(up);
                     }
-                } else if !customs.contains(local_pkg.name()) {
+                } else {
                     missing.push(local_pkg);
                 }
 
@@ -432,16 +426,11 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     ) -> Result<AurUpdates<'a>, Error> {
         let mut dbs = self.alpm.syncdbs().to_list_mut();
         dbs.retain(|db| repos.iter().any(|repo| repo.as_ref() == db.name()));
-        let customs = self
-            .repos
-            .iter()
-            .flat_map(|r| &r.pkgs)
-            .flat_map(|p| p.names())
-            .collect::<HashSet<_>>();
 
         let all_pkgs = dbs
             .iter()
             .flat_map(|db| db.pkgs())
+            .filter(|p| !self.is_pkgbuild(p.name()))
             .map(|p| p.name())
             .collect::<Vec<_>>();
         self.raur
@@ -480,7 +469,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
                             return Some(up);
                         }
-                    } else if !customs.contains(local_pkg.name()) {
+                    } else {
                         missing.push(local_pkg);
                     }
 
@@ -1559,6 +1548,15 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             pkgs: vec![pkg],
             build: b,
         }));
+    }
+
+    fn is_pkgbuild(&self, name: &str) -> bool {
+        self.repos
+            .iter()
+            .flat_map(|r| &r.pkgs)
+            .flat_map(|p| &p.pkgs)
+            .map(|p| &p.pkgname)
+            .any(|p| p == name)
     }
 
     fn calculate_make(&mut self) {
