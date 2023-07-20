@@ -23,6 +23,7 @@ use raur::{ArcPackage, Cache, Raur, SearchBy};
 
 bitflags! {
     /// Config options for Handle.
+    #[derive(Debug)]
     pub struct Flags: u32 {
         /// Do not resolve dependencies.
         const NO_DEPS = 1 << 2;

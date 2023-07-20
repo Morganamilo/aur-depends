@@ -20,12 +20,12 @@ alpm = "2.2.1"
 alpm-utils = "2.0.0"
 log = "0.4.16"
 raur = { version = "7.0.0", default-features = false, features = ["async"] }
-bitflags = "1.3.2"
+bitflags = "2.3.3"
 srcinfo = "1.0.0"
 
 [dev-dependencies]
 async-trait = "0.1.53"
-simplelog = "0.11.2"
+simplelog = "0.12.1"
 tokio = { version = "1.17.0", features = ["macros", "rt"] }
 
 [features]
