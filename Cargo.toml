@@ -5,8 +5,8 @@ authors = ["morganamilo <m?organamilo@gmail.com>"]
 edition = "2021"
 
 description = "A libary for resolving aur dependencies"
-homepage = "http://github.com/Morganamilo/aur-depends"
-repository = "http://github.com/Morganamilo/aur-depends"
+homepage = "https://github.com/Morganamilo/aur-depends"
+repository = "https://github.com/Morganamilo/aur-depends"
 documentation = "https://docs.rs/aur_depends"
 license = "GPL-3.0"
 keywords = ["archlinux", "pkgbuild", "arch", "aur"]
