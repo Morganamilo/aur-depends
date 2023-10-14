@@ -1,10 +1,10 @@
-use crate::{AurPackage, CustomPackage};
+use crate::{AurPackage, Pkgbuild};
 
 use std::fmt::{Display, Formatter, Write};
 
 enum PkgNames<A, C> {
     Aur(A),
-    Custom(C),
+    Pkgbuild(C),
 }
 
 impl<'a, A, C> Iterator for PkgNames<A, C>
@@ -17,20 +17,20 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             PkgNames::Aur(i) => i.next(),
-            PkgNames::Custom(i) => i.next(),
+            PkgNames::Pkgbuild(i) => i.next(),
         }
     }
 }
 
-/// Packages from a custom repo.
+/// Packages from a pkgbuild repo.
 #[derive(Debug, Eq, Clone, PartialEq, Ord, PartialOrd, Hash)]
-pub struct CustomPackages {
+pub struct PkgbuildPackages {
     /// the repo the package came from.
     pub repo: String,
     /// The srcinfo of the pkgbase.
     pub srcinfo: Box<srcinfo::Srcinfo>,
     /// The pkgs from the srcinfo to install.
-    pub pkgs: Vec<CustomPackage>,
+    pub pkgs: Vec<Pkgbuild>,
     /// Should the package be built.
     pub build: bool,
 }
@@ -50,8 +50,8 @@ pub struct AurBase {
 pub enum Base {
     /// Aur packages.
     Aur(AurBase),
-    /// Custom packages.
-    Custom(CustomPackages),
+    /// pkgbuild packages.
+    Pkgbuild(PkgbuildPackages),
 }
 
 impl Display for AurBase {
@@ -61,7 +61,7 @@ impl Display for AurBase {
     }
 }
 
-impl Display for CustomPackages {
+impl Display for PkgbuildPackages {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let pkgs = self.pkgs.iter().map(|p| p.pkg.pkgname.as_str());
         Base::write_base(f, self.package_base(), &self.version(), pkgs)
@@ -72,7 +72,7 @@ impl Display for Base {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Base::Aur(base) => base.fmt(f),
-            Base::Custom(base) => base.fmt(f),
+            Base::Pkgbuild(base) => base.fmt(f),
         }
     }
 }
@@ -89,7 +89,7 @@ impl AurBase {
     }
 }
 
-impl CustomPackages {
+impl PkgbuildPackages {
     /// Gets the package base of base.
     pub fn package_base(&self) -> &str {
         &self.srcinfo.base.pkgbase
@@ -106,7 +106,7 @@ impl Base {
     pub fn package_base(&self) -> &str {
         match self {
             Base::Aur(base) => base.package_base(),
-            Base::Custom(base) => base.package_base(),
+            Base::Pkgbuild(base) => base.package_base(),
         }
     }
 
@@ -114,7 +114,7 @@ impl Base {
     pub fn version(&self) -> String {
         match self {
             Base::Aur(base) => base.version(),
-            Base::Custom(base) => base.version(),
+            Base::Pkgbuild(base) => base.version(),
         }
     }
 
@@ -122,7 +122,7 @@ impl Base {
     pub fn package_count(&self) -> usize {
         match self {
             Base::Aur(base) => base.pkgs.len(),
-            Base::Custom(base) => base.pkgs.len(),
+            Base::Pkgbuild(base) => base.pkgs.len(),
         }
     }
 
@@ -130,8 +130,8 @@ impl Base {
     pub fn packages(&self) -> impl Iterator<Item = &str> {
         match self {
             Base::Aur(base) => PkgNames::Aur(base.pkgs.iter().map(|p| p.pkg.name.as_str())),
-            Base::Custom(base) => {
-                PkgNames::Custom(base.pkgs.iter().map(|p| p.pkg.pkgname.as_str()))
+            Base::Pkgbuild(base) => {
+                PkgNames::Pkgbuild(base.pkgs.iter().map(|p| p.pkg.pkgname.as_str()))
             }
         }
     }
@@ -140,7 +140,7 @@ impl Base {
     pub fn make(&self) -> bool {
         match self {
             Base::Aur(a) => a.pkgs.iter().any(|p| p.make),
-            Base::Custom(c) => c.pkgs.iter().any(|p| p.make),
+            Base::Pkgbuild(c) => c.pkgs.iter().any(|p| p.make),
         }
     }
 
@@ -148,7 +148,7 @@ impl Base {
     pub fn target(&self) -> bool {
         match self {
             Base::Aur(a) => a.pkgs.iter().any(|p| p.target),
-            Base::Custom(c) => c.pkgs.iter().any(|p| p.target),
+            Base::Pkgbuild(c) => c.pkgs.iter().any(|p| p.target),
         }
     }
 
@@ -156,7 +156,7 @@ impl Base {
     pub fn build(&self) -> bool {
         match self {
             Base::Aur(a) => a.build,
-            Base::Custom(c) => c.build,
+            Base::Pkgbuild(c) => c.build,
         }
     }
 
