@@ -1,16 +1,15 @@
 use crate::actions::{
-    Actions, AurPackage, AurUpdate, AurUpdates, DepMissing, Missing, RepoPackage, Unneeded,
+    Actions, AurPackage, AurUpdate, DepMissing, Missing, PkgbuildUpdate, RepoPackage, Unneeded,
 };
 use crate::base::Base;
 use crate::pkgbuild::PkgbuildRepo;
 use crate::satisfies::{satisfies_provide, Satisfies};
-use crate::{AurBase, Error, Pkgbuild, PkgbuildPackages, PkgbuildUpdate, PkgbuildUpdates};
+use crate::{AurBase, Error, Pkgbuild, PkgbuildPackages, Updates};
 
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 
-use alpm::{Alpm, Db, Dep, Depend, Version};
+use alpm::{Alpm, AlpmList, Db, Dep, Depend, Version};
 use alpm_utils::{AsTarg, DbListExt, Targ};
 use bitflags::bitflags;
 use log::Level::Debug;
@@ -42,7 +41,7 @@ bitflags! {
         const CHECK_DEPENDS = 1 << 10;
         /// Ignore targets that are up to date.
         const NEEDED = 1 << 11;
-        /// Search PKGBUILD reopos for upgrades
+        /// Search PKGBUILD repos for upgrades and targets
         const PKGBUILDS = 1 << 12;
         /// Search aur for targets.
         const AUR = 1 << 13;
@@ -333,12 +332,29 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         self.cache
     }
 
-    /// Get which aur packages need to be updated.
+    fn update_targs<'c>(
+        alpm: &'c Alpm,
+        local: Option<AlpmList<'c, alpm::Db<'c>>>,
+    ) -> Vec<alpm::Package<'c>> {
+        let dbs = alpm.syncdbs();
+
+        if let Some(local) = local {
+            local.iter().flat_map(|db| db.pkgs()).collect()
+        } else {
+            alpm.localdb()
+                .pkgs()
+                .into_iter()
+                .filter(|p| dbs.pkg(p.name()).is_err())
+                .collect()
+        }
+    }
+
+    /// Get aur packages need to be updated.
     ///
     /// # Example
     ///
     /// ```no_run
-    /// # use aur_depends::{Error, AurUpdates};
+    /// # use aur_depends::{Error, Updates};
     /// # #[tokio::test]
     /// # async fn run() -> Result<(), Error> {
     /// use std::collections::HashSet;
@@ -352,245 +368,99 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     /// let mut cache = HashSet::new();
     /// let mut resolver = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::aur_only());
     ///
-    /// let updates = resolver.aur_updates().await?;
+    /// let updates = resolver.updates().await?;
     ///
-    /// for update in updates.updates {
+    /// for update in updates.aur_updates {
     ///     println!("update: {}: {} -> {}", update.local.name(), update.local.version(),
     ///     update.remote.version);
     /// }
     /// # Ok (())
     /// # }
     /// ```
-    pub async fn aur_updates(&mut self) -> Result<AurUpdates<'a>, Error> {
-        let local_pkgs = self
-            .alpm
-            .localdb()
-            .pkgs()
-            .iter()
-            .filter(|p| self.alpm.syncdbs().pkg(p.name()).is_err())
-            .filter(|p| !self.is_pkgbuild(p.name()))
-            .collect::<Vec<_>>();
+    pub async fn updates(&mut self, local: Option<&[&str]>) -> Result<Updates<'a>, Error> {
+        let local = match local {
+            Some(local) => {
+                let mut local_dbs = self.alpm.syncdbs().to_list_mut();
+                local_dbs.retain(|db| local.into_iter().any(|name| *name == db.name()));
+                Some(local_dbs)
+            }
+            None => None,
+        };
 
-        let local_pkg_names = local_pkgs.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
-        self.raur
-            .cache_info(self.cache, &local_pkg_names)
-            .await
-            .map_err(|e| Error::Raur(Box::new(e)))?;
-        let mut missing = Vec::new();
-        let mut ignored = Vec::new();
-
-        let to_upgrade = local_pkgs
+        let targets = Self::update_targs(self.alpm, local.as_ref().map(|l| l.as_list()));
+        let (mut pkgbuilds, mut aur) = targets
             .into_iter()
-            .filter_map(|local_pkg| {
-                if let Some(pkg) = self.cache.get(local_pkg.name()) {
-                    let should_upgrade = if self.flags.contains(Flags::ENABLE_DOWNGRADE) {
-                        Version::new(&*pkg.version) != local_pkg.version()
-                    } else {
-                        Version::new(&*pkg.version) > local_pkg.version()
-                    };
+            .partition::<Vec<_>, _>(|p| self.is_pkgbuild(p.name()));
 
-                    if should_upgrade {
-                        let should_ignore = local_pkg.should_ignore();
+        if !self.flags.contains(Flags::AUR) {
+            aur.clear();
+        }
+        if !self.flags.contains(Flags::PKGBUILDS) {
+            pkgbuilds.clear();
+        }
 
-                        let up = AurUpdate {
-                            local: local_pkg,
-                            remote: pkg.clone(),
-                        };
-                        if should_ignore {
-                            ignored.push(up);
-                            return None;
-                        }
-
-                        return Some(up);
-                    }
-                } else {
-                    missing.push(local_pkg);
-                }
-
-                None
-            })
-            .collect::<Vec<_>>();
-
-        let updates = AurUpdates {
-            updates: to_upgrade,
-            missing,
-            ignored,
-        };
-        Ok(updates)
-    }
-
-    /// Fetch updates from a list of local repos.
-    pub async fn local_aur_updates<S: AsRef<str>>(
-        &mut self,
-        repos: &[S],
-    ) -> Result<AurUpdates<'a>, Error> {
-        let mut dbs = self.alpm.syncdbs().to_list_mut();
-        dbs.retain(|db| repos.iter().any(|repo| repo.as_ref() == db.name()));
-
-        let all_pkgs = dbs
-            .iter()
-            .flat_map(|db| db.pkgs())
-            .filter(|p| !self.is_pkgbuild(p.name()))
-            .map(|p| p.name())
-            .collect::<Vec<_>>();
+        let aur_pkg_names = aur.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
         self.raur
-            .cache_info(self.cache, &all_pkgs)
+            .cache_info(self.cache, &aur_pkg_names)
             .await
             .map_err(|e| Error::Raur(Box::new(e)))?;
 
-        let mut updates = Vec::new();
-        let mut seen = HashSet::new();
-        let mut missing = Vec::new();
-        let mut ignored = Vec::new();
+        let mut updates = Updates::default();
 
-        for db in dbs {
-            let local_pkgs = db.pkgs();
-            let to_upgrade = local_pkgs
-                .into_iter()
-                .filter_map(|local_pkg| {
-                    if let Some(pkg) = self.cache.get(local_pkg.name()) {
-                        let should_upgrade = if self.flags.contains(Flags::ENABLE_DOWNGRADE) {
-                            Version::new(&*pkg.version) != local_pkg.version()
-                        } else {
-                            Version::new(&*pkg.version) > local_pkg.version()
-                        };
+        for local in pkgbuilds {
+            let (repo, srcinfo, remote) = self.find_pkgbuild(local.name()).unwrap();
 
-                        if should_upgrade {
-                            let should_ignore = local_pkg.should_ignore();
+            let should_upgrade = if self.flags.contains(Flags::ENABLE_DOWNGRADE) {
+                Version::new(srcinfo.version()) != local.version()
+            } else {
+                Version::new(srcinfo.version()) > local.version()
+            };
+            if !should_upgrade {
+                continue;
+            }
 
-                            let up = AurUpdate {
-                                local: local_pkg,
-                                remote: pkg.clone(),
-                            };
-                            if should_ignore {
-                                ignored.push(up);
-                                return None;
-                            }
+            let update = PkgbuildUpdate {
+                local,
+                repo: repo.to_string(),
+                remote_srcinfo: srcinfo,
+                remote_pkg: remote,
+            };
 
-                            return Some(up);
-                        }
-                    } else {
-                        missing.push(local_pkg);
-                    }
-
-                    None
-                })
-                .filter(|p| !seen.contains(p.local.name()))
-                .collect::<Vec<_>>();
-
-            seen.extend(to_upgrade.iter().map(|p| p.local.name()));
-            updates.extend(to_upgrade);
-        }
-
-        let updates = AurUpdates {
-            updates,
-            missing,
-            ignored,
-        };
-
-        Ok(updates)
-    }
-
-    /// Fetch updates from pkgbuild repo.
-    pub fn pkgbuild_updates(&mut self) -> Result<PkgbuildUpdates<'a>, Error> {
-        let mut updates = HashMap::new();
-        let mut ignored = Vec::new();
-
-        for repo in &self.repos {
-            for base in &repo.pkgs {
-                for pkg in &base.pkgs {
-                    let entry = updates.entry(pkg.pkgname.clone());
-                    let entry = match entry {
-                        Entry::Occupied(_) => continue,
-                        Entry::Vacant(v) => v,
-                    };
-
-                    if let Ok(local_pkg) = self.alpm.localdb().pkg(pkg.pkgname.as_str()) {
-                        let should_upgrade = if self.flags.contains(Flags::ENABLE_DOWNGRADE) {
-                            Version::new(base.version().as_str()) != local_pkg.version()
-                        } else {
-                            Version::new(base.version().as_str()) > local_pkg.version()
-                        };
-
-                        if should_upgrade {
-                            let should_ignore = local_pkg.should_ignore();
-
-                            let up = PkgbuildUpdate {
-                                local: local_pkg,
-                                repo: repo.name.to_string(),
-                                remote_srcinfo: base,
-                                remote_pkg: pkg,
-                            };
-                            if should_ignore {
-                                ignored.push(up);
-                                continue;
-                            }
-
-                            entry.insert(up);
-                        }
-                    }
-                }
+            if local.should_ignore() {
+                updates.ignored_pkgbuild.push(update);
+            } else {
+                updates.pkgbuild_updates.push(update);
             }
         }
 
-        let updates = PkgbuildUpdates {
-            updates: updates.into_values().collect(),
-            ignored,
-        };
-        Ok(updates)
-    }
-    /// Fetch updates from pkgbuild repo that exist in your local repo.
-    pub fn local_pkgbuild_updates<S: AsRef<str>>(
-        &mut self,
-        repos: &[S],
-    ) -> Result<PkgbuildUpdates<'a>, Error> {
-        let mut updates = HashMap::new();
-        let mut ignored = Vec::new();
-
-        let mut dbs = self.alpm.syncdbs().to_list_mut();
-        dbs.retain(|db| repos.iter().any(|repo| db.name() == repo.as_ref()));
-
-        for repo in &self.repos {
-            for base in &repo.pkgs {
-                for pkg in &base.pkgs {
-                    let entry = updates.entry(pkg.pkgname.clone());
-                    let entry = match entry {
-                        Entry::Occupied(_) => continue,
-                        Entry::Vacant(v) => v,
-                    };
-
-                    if let Ok(local_pkg) = dbs.pkg(pkg.pkgname.as_str()) {
-                        let should_upgrade = if self.flags.contains(Flags::ENABLE_DOWNGRADE) {
-                            Version::new(base.version().as_str()) != local_pkg.version()
-                        } else {
-                            Version::new(base.version().as_str()) > local_pkg.version()
-                        };
-
-                        if should_upgrade {
-                            let should_ignore = local_pkg.should_ignore();
-
-                            let up = PkgbuildUpdate {
-                                local: local_pkg,
-                                repo: repo.name.to_string(),
-                                remote_srcinfo: base,
-                                remote_pkg: pkg,
-                            };
-                            if should_ignore {
-                                ignored.push(up);
-                                continue;
-                            }
-
-                            entry.insert(up);
-                        }
-                    }
+        for local in aur {
+            if let Some(pkg) = self.cache.get(local.name()) {
+                let should_upgrade = if self.flags.contains(Flags::ENABLE_DOWNGRADE) {
+                    Version::new(&*pkg.version) != local.version()
+                } else {
+                    Version::new(&*pkg.version) > local.version()
+                };
+                if !should_upgrade {
+                    continue;
                 }
+
+                let should_ignore = local.should_ignore();
+
+                let update = AurUpdate {
+                    local,
+                    remote: pkg.clone(),
+                };
+
+                if should_ignore {
+                    updates.ignored_aur.push(update);
+                } else {
+                    updates.aur_updates.push(update);
+                }
+            } else {
+                updates.missing.push(local);
             }
         }
 
-        let updates = PkgbuildUpdates {
-            updates: updates.into_values().collect(),
-            ignored,
-        };
         Ok(updates)
     }
 
@@ -1544,13 +1414,24 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         }));
     }
 
+    fn find_pkgbuild(
+        &self,
+        name: &str,
+    ) -> Option<(&'a str, &'a srcinfo::Srcinfo, &'a srcinfo::Package)> {
+        for repo in &self.repos {
+            for &srcinfo in &repo.pkgs {
+                for pkg in &srcinfo.pkgs {
+                    if pkg.pkgname == name {
+                        return Some((repo.name, srcinfo, pkg));
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn is_pkgbuild(&self, name: &str) -> bool {
-        self.repos
-            .iter()
-            .flat_map(|r| &r.pkgs)
-            .flat_map(|p| &p.pkgs)
-            .map(|p| &p.pkgname)
-            .any(|p| p == name)
+        self.find_pkgbuild(name).is_some()
     }
 
     fn calculate_make(&mut self) {
@@ -2122,7 +2003,7 @@ mod tests {
         let raur = raur();
         let mut cache = HashSet::new();
         let mut handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
-        let pkgs = handle.aur_updates().await.unwrap().updates;
+        let pkgs = handle.updates(None).await.unwrap().aur_updates;
         let pkgs = pkgs
             .iter()
             .map(|p| p.remote.name.as_str())
@@ -2142,7 +2023,7 @@ mod tests {
             &raur,
             Flags::new() | Flags::ENABLE_DOWNGRADE,
         );
-        let pkgs = handle.aur_updates().await.unwrap().updates;
+        let pkgs = handle.updates(None).await.unwrap().aur_updates;
         let pkgs = pkgs
             .iter()
             .map(|p| p.remote.name.as_str())

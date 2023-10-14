@@ -152,22 +152,17 @@ pub struct PkgbuildUpdate<'a> {
 
 /// Collection of AUR updates and missing packages
 #[derive(Debug, Default)]
-pub struct AurUpdates<'a> {
-    /// The updates.
-    pub updates: Vec<AurUpdate<'a>>,
-    /// Foreign that were not found in the AUR.
+pub struct Updates<'a> {
+    /// The aur updates.
+    pub aur_updates: Vec<AurUpdate<'a>>,
+    /// The pkgbuild updates.
+    pub pkgbuild_updates: Vec<PkgbuildUpdate<'a>>,
+    /// Packages that matched ignore pkg/group.
+    pub ignored_aur: Vec<AurUpdate<'a>>,
+    /// Packages that matched ignore pkg/group.
+    pub ignored_pkgbuild: Vec<PkgbuildUpdate<'a>>,
+    /// Foreign that were not found in the AUR or elsewhere.
     pub missing: Vec<alpm::Package<'a>>,
-    /// Packages that matched ignore pkg/group
-    pub ignored: Vec<AurUpdate<'a>>,
-}
-
-/// Collection of pkgbuild updates and missing packages
-#[derive(Debug, Default)]
-pub struct PkgbuildUpdates<'a> {
-    /// The updates.
-    pub updates: Vec<PkgbuildUpdate<'a>>,
-    /// Packages that matched ignore pkg/group
-    pub ignored: Vec<PkgbuildUpdate<'a>>,
 }
 
 /// Describes a package in the package stack.
