@@ -1,6 +1,6 @@
 use crate::actions::{Actions, AurPackage, DepMissing, Missing, RepoPackage, Unneeded};
 use crate::base::Base;
-use crate::cb::{Group, GroupCallback, IsDevel, ProviderCallback};
+use crate::cb::{Group, GroupCB, IsDevelCb, ProviderCB};
 use crate::pkgbuild::PkgbuildRepo;
 use crate::satisfies::{satisfies_provide, Satisfies};
 use crate::{AurBase, Error, Pkgbuild, PkgbuildPackages};
@@ -180,9 +180,9 @@ pub struct Resolver<'a, 'b, H = raur::Handle> {
     pub(crate) seen: HashSet<String>,
     pub(crate) flags: Flags,
     pub(crate) aur_namespace: Option<String>,
-    pub(crate) provider_callback: Option<ProviderCallback>,
-    pub(crate) group_callback: Option<GroupCallback<'a>>,
-    pub(crate) is_devel: Option<IsDevel>,
+    pub(crate) provider_callback: ProviderCB,
+    pub(crate) group_callback: GroupCB<'a>,
+    pub(crate) is_devel: IsDevelCb,
 }
 
 impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sync>
@@ -208,10 +208,10 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             raur,
             flags,
             seen: HashSet::new(),
-            provider_callback: None,
-            group_callback: None,
-            is_devel: None,
             aur_namespace: None,
+            provider_callback: Default::default(),
+            group_callback: Default::default(),
+            is_devel: Default::default(),
         }
     }
 
@@ -314,8 +314,8 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                         .filter_map(|db| db.group(pkg.pkg).map(|group| Group { db, group }).ok())
                         .collect::<Vec<_>>();
                     if !groups.is_empty() {
-                        if let Some(ref f) = self.group_callback {
-                            for alpm_pkg in f.0(&groups) {
+                        if let Some(f) = self.group_callback.get() {
+                            for alpm_pkg in f(&groups) {
                                 repo_targets.push((pkg, alpm_pkg));
                             }
                         } else {
@@ -433,11 +433,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         };
 
         if self.flags.contains(Flags::NEEDED) || !is_target {
-            let is_devel = self
-                .is_devel
-                .as_ref()
-                .map(|f| f.0(aur_pkg))
-                .unwrap_or(false);
+            let is_devel = self.is_devel.get().map(|f| f(aur_pkg)).unwrap_or(false);
 
             if !is_devel {
                 if let Ok(local) = localdb.pkg(&*pkg.name) {
@@ -506,8 +502,8 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         if self.flags.contains(Flags::NEEDED) || !is_target {
             let is_devel = self
                 .is_devel
-                .as_ref()
-                .map(|f| f.0(pkgbuild.pkg))
+                .get()
+                .map(|f| f(pkgbuild.pkg))
                 .unwrap_or(false);
 
             if !is_devel {
@@ -573,7 +569,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     /// unless we are looking for a target, then always show all options.
     fn select_satisfier_aur_cache(&self, dep: &Dep, target: bool) -> Option<&ArcPackage> {
         debug!("select satisfier: {}", dep);
-        if let Some(ref f) = self.provider_callback {
+        if let Some(f) = self.provider_callback.get() {
             let mut pkgs = self
                 .cache
                 .iter()
@@ -611,7 +607,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 pkgs.sort_unstable();
             }
 
-            let choice = f.0(dep.to_string().as_str(), &pkgs);
+            let choice = f(dep.to_string().as_str(), &pkgs);
             debug!("choice was: {}={}", choice, pkgs[choice]);
             self.cache.get(pkgs[choice])
         } else {

@@ -22,3 +22,4 @@ pub use crate::base::*;
 pub use crate::error::*;
 pub use crate::pkgbuild::*;
 pub use crate::resolve::*;
+pub use crate::upgrade::*;
