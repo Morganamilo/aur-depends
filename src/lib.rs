@@ -9,7 +9,7 @@
 mod actions;
 mod base;
 mod error;
-mod repo;
+mod pkgbuild;
 mod resolve;
 mod satisfies;
 #[cfg(test)]
@@ -18,5 +18,5 @@ mod tests;
 pub use crate::actions::*;
 pub use crate::base::*;
 pub use crate::error::*;
-pub use crate::repo::*;
+pub use crate::pkgbuild::*;
 pub use crate::resolve::*;

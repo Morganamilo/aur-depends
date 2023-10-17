@@ -33,18 +33,18 @@ impl<'a> Actions<'a> {
             .iter()
             .filter_map(|b| match b {
                 Base::Aur(pkg) => Some(&pkg.pkgs),
-                Base::Custom(_) => None,
+                Base::Pkgbuild(_) => None,
             })
             .flatten()
     }
 
-    /// An iterator over each custom package in self.build.
-    pub fn iter_custom_pkgs(&self) -> impl Iterator<Item = (&srcinfo::Srcinfo, &CustomPackage)> {
+    /// An iterator over each pkgbuild in self.build.
+    pub fn iter_pkgbuilds(&self) -> impl Iterator<Item = (&srcinfo::Srcinfo, &Pkgbuild)> {
         self.build
             .iter()
             .filter_map(|b| match b {
                 Base::Aur(_) => None,
-                Base::Custom(base) => Some((&base.srcinfo, &base.pkgs)),
+                Base::Pkgbuild(base) => Some((&base.srcinfo, &base.pkgs)),
             })
             .flat_map(|(base, pkgs)| pkgs.iter().map(move |p| (base.as_ref(), p)))
     }
@@ -84,7 +84,7 @@ pub struct Package<T> {
 pub type AurPackage = Package<ArcPackage>;
 
 /// Wrapper around Srcinfo for extra metadata.
-pub type CustomPackage = Package<srcinfo::Package>;
+pub type Pkgbuild = Package<srcinfo::Package>;
 
 /// Wrapper around alpm::Package for extra metadata.
 pub type RepoPackage<'a> = Package<alpm::Package<'a>>;
@@ -137,16 +137,16 @@ pub struct AurUpdate<'a> {
     pub remote: ArcPackage,
 }
 
-/// An custom package that should be updated.
+/// An pkgbuild2 should be updated.
 #[derive(Debug)]
-pub struct CustomUpdate<'a> {
+pub struct PkgbuildUpdate<'a> {
     /// The local package.
     pub local: alpm::Package<'a>,
-    /// The custom repo the package belongs to.
+    /// The pkgbuild repo the package belongs to.
     pub repo: String,
-    /// The custom package base srcinfo.
+    /// The pkgbuild package base srcinfo.
     pub remote_srcinfo: &'a Srcinfo,
-    /// The custom package base package,
+    /// The pkgbuild package base package,
     pub remote_pkg: &'a srcinfo::Package,
 }
 
@@ -161,13 +161,13 @@ pub struct AurUpdates<'a> {
     pub ignored: Vec<AurUpdate<'a>>,
 }
 
-/// Collection of custom updates and missing packages
+/// Collection of pkgbuild updates and missing packages
 #[derive(Debug, Default)]
-pub struct CustomUpdates<'a> {
+pub struct PkgbuildUpdates<'a> {
     /// The updates.
-    pub updates: Vec<CustomUpdate<'a>>,
+    pub updates: Vec<PkgbuildUpdate<'a>>,
     /// Packages that matched ignore pkg/group
-    pub ignored: Vec<CustomUpdate<'a>>,
+    pub ignored: Vec<PkgbuildUpdate<'a>>,
 }
 
 /// Describes a package in the package stack.
@@ -194,7 +194,7 @@ impl<'a> Actions<'a> {
         let name = name.as_ref();
         let install = &self.install;
         self.iter_aur_pkgs().any(|pkg| pkg.pkg.name == name)
-            || self.iter_custom_pkgs().any(|pkg| pkg.1.pkg.pkgname == name)
+            || self.iter_pkgbuilds().any(|pkg| pkg.1.pkg.pkgname == name)
             || install.iter().any(|pkg| pkg.pkg.name() == name)
     }
 
@@ -232,7 +232,7 @@ impl<'a> Actions<'a> {
                     .or_insert_with(|| Conflict::new(pkg.name.to_string()))
                     .push(name.to_string(), conflict);
             });
-        self.iter_custom_pkgs()
+        self.iter_pkgbuilds()
             .filter(|(_, pkg)| !runtime || !pkg.make)
             .filter(|(_, pkg)| pkg.pkg.pkgname != name)
             .filter(|(base, pkg)| (*base, &pkg.pkg).satisfies_dep(conflict, false))
@@ -292,7 +292,7 @@ impl<'a> Actions<'a> {
                 );
             }
         }
-        for (_, pkg) in self.iter_custom_pkgs() {
+        for (_, pkg) in self.iter_pkgbuilds() {
             if runtime && pkg.make {
                 continue;
             }
@@ -341,7 +341,7 @@ impl<'a> Actions<'a> {
             }
         }
 
-        for (_, pkg) in self.iter_custom_pkgs() {
+        for (_, pkg) in self.iter_pkgbuilds() {
             if runtime && pkg.make {
                 continue;
             }
@@ -427,16 +427,14 @@ impl<'a> Actions<'a> {
         let mut names = HashSet::new();
 
         let build = self.iter_aur_pkgs().map(|pkg| pkg.pkg.name.as_str());
-        let custom = self
-            .iter_custom_pkgs()
-            .map(|pkg| pkg.1.pkg.pkgname.as_str());
+        let pkgbuilds = self.iter_pkgbuilds().map(|pkg| pkg.1.pkg.pkgname.as_str());
 
         let duplicates = self
             .install
             .iter()
             .map(|pkg| pkg.pkg.name())
             .chain(build)
-            .chain(custom)
+            .chain(pkgbuilds)
             .filter(|&name| !names.insert(name))
             .map(Into::into)
             .collect::<Vec<_>>();
