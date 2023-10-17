@@ -1,16 +1,14 @@
-use crate::actions::{
-    Actions, AurPackage, AurUpdate, DepMissing, Missing, PkgbuildUpdate, RepoPackage, Unneeded,
-};
+use crate::actions::{Actions, AurPackage, DepMissing, Missing, RepoPackage, Unneeded};
 use crate::base::Base;
+use crate::cb::{Group, GroupCallback, IsDevel, ProviderCallback};
 use crate::pkgbuild::PkgbuildRepo;
 use crate::satisfies::{satisfies_provide, Satisfies};
-use crate::{AurBase, Error, Pkgbuild, PkgbuildPackages, Updates};
+use crate::{AurBase, Error, Pkgbuild, PkgbuildPackages};
 
 use std::collections::HashSet;
-use std::fmt;
 
-use alpm::{Alpm, AlpmList, Db, Dep, Depend, Version};
-use alpm_utils::{AsTarg, DbListExt, Targ};
+use alpm::{Alpm, Dep, Depend, Version};
+use alpm_utils::{AsTarg, Targ};
 use bitflags::bitflags;
 use log::Level::Debug;
 use log::{debug, log_enabled};
@@ -46,7 +44,7 @@ bitflags! {
         /// Search aur for targets.
         const AUR = 1 << 13;
         /// Search alpm repos for targets.
-        const NATIVE_REPO = 1 << 14;
+        const REPO = 1 << 14;
         /// when fetching updates, also include packages that are older than locally installed.
         const ENABLE_DOWNGRADE = 1 << 15;
         /// Pull in pkgbuild dependencies even if they are already satisfied.
@@ -62,13 +60,13 @@ impl Flags {
             | Flags::MISSING_PROVIDES
             | Flags::CHECK_DEPENDS
             | Flags::AUR
-            | Flags::NATIVE_REPO
+            | Flags::REPO
             | Flags::PKGBUILDS
     }
 
     /// Create a new Flags with repo targets disabled
     pub fn aur_only() -> Self {
-        Flags::new() & !Flags::NATIVE_REPO
+        Flags::new() & !Flags::REPO
     }
 }
 
@@ -76,54 +74,6 @@ impl Default for Flags {
     fn default() -> Self {
         Self::new()
     }
-}
-
-struct ProviderCallback(Box<dyn Fn(&str, &[&str]) -> usize>);
-struct GroupCallback<'a>(Box<dyn Fn(&[Group<'a>]) -> Vec<alpm::Package<'a>>>);
-struct IsDevel(Box<dyn Fn(&str) -> bool>);
-
-impl fmt::Debug for ProviderCallback {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.write_str("ProviderCallback")
-    }
-}
-
-impl<'a> fmt::Debug for GroupCallback<'a> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.write_str("GroupCallback")
-    }
-}
-
-impl<'a> GroupCallback<'a> {
-    fn new<F: Fn(&[Group<'a>]) -> Vec<alpm::Package<'a>> + 'static>(f: F) -> Self {
-        GroupCallback(Box::new(f))
-    }
-}
-
-impl ProviderCallback {
-    fn new<F: Fn(&str, &[&str]) -> usize + 'static>(f: F) -> Self {
-        ProviderCallback(Box::new(f))
-    }
-}
-
-impl fmt::Debug for IsDevel {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.write_str("IsDevel")
-    }
-}
-
-impl IsDevel {
-    fn new<F: Fn(&str) -> bool + 'static>(f: F) -> Self {
-        IsDevel(Box::new(f))
-    }
-}
-
-/// An alpm Db+Group pair passed to the group callback.
-pub struct Group<'a> {
-    /// The db the group belongs to.
-    pub db: Db<'a>,
-    /// The group.
-    pub group: alpm::Group<'a>,
 }
 
 #[derive(Debug)]
@@ -220,19 +170,19 @@ impl<'a> AurOrPkgbuild<'a> {
 /// ```
 #[derive(Debug)]
 pub struct Resolver<'a, 'b, H = raur::Handle> {
-    alpm: &'a Alpm,
-    repos: Vec<PkgbuildRepo<'a>>,
-    resolved: HashSet<String>,
-    cache: &'b mut Cache,
-    stack: Vec<DepMissing>,
-    raur: &'b H,
-    actions: Actions<'a>,
-    seen: HashSet<String>,
-    flags: Flags,
-    provider_callback: Option<ProviderCallback>,
-    group_callback: Option<GroupCallback<'a>>,
-    is_devel: Option<IsDevel>,
-    aur_namespace: Option<String>,
+    pub(crate) alpm: &'a Alpm,
+    pub(crate) repos: Vec<PkgbuildRepo<'a>>,
+    pub(crate) resolved: HashSet<String>,
+    pub(crate) cache: &'b mut Cache,
+    pub(crate) stack: Vec<DepMissing>,
+    pub(crate) raur: &'b H,
+    pub(crate) actions: Actions<'a>,
+    pub(crate) seen: HashSet<String>,
+    pub(crate) flags: Flags,
+    pub(crate) aur_namespace: Option<String>,
+    pub(crate) provider_callback: Option<ProviderCallback>,
+    pub(crate) group_callback: Option<GroupCallback<'a>>,
+    pub(crate) is_devel: Option<IsDevel>,
 }
 
 impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sync>
@@ -265,43 +215,6 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         }
     }
 
-    /// Set the provider callback
-    ///
-    /// The provider callback will be called any time there is a choice of multiple AUR packages
-    /// that can satisfy a dependency. This callback receives the dependency that we are trying to
-    /// satisfy and a slice of package names satisfying it.
-    ///
-    /// The callback returns returns the index of which package to pick.
-    ///
-    /// Retuning an invalid index will cause a panic.
-    pub fn provider_callback<F: Fn(&str, &[&str]) -> usize + 'static>(mut self, f: F) -> Self {
-        self.provider_callback = Some(ProviderCallback::new(f));
-        self
-    }
-
-    /// Set the group callback
-    ///
-    /// The group callback is called whenever a group is processed. The callback recieves the group
-    /// and returns a list of packages should be installed from the group;
-    ///
-    pub fn group_callback<F: Fn(&[Group<'a>]) -> Vec<alpm::Package<'a>> + 'static>(
-        mut self,
-        f: F,
-    ) -> Self {
-        self.group_callback = Some(GroupCallback::new(f));
-        self
-    }
-
-    /// Set the function for determining if a package is devel.
-    ///
-    /// Devel packages are never skipped when using NEEDED.
-    ///
-    /// By default, no packages are considered devel.
-    pub fn devel_pkgs<F: Fn(&str) -> bool + 'static>(mut self, f: F) -> Self {
-        self.is_devel = Some(IsDevel::new(f));
-        self
-    }
-
     /// If enabled, causes `aur/foo` to mean from the AUR, instead of a repo named `aur`.
     pub fn aur_namespace(mut self, enable: bool) -> Self {
         if enable {
@@ -330,138 +243,6 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     /// Mut getter for the aur cache
     pub fn get_cache_mut(&mut self) -> &mut Cache {
         self.cache
-    }
-
-    fn update_targs<'c>(
-        alpm: &'c Alpm,
-        local: Option<AlpmList<'c, alpm::Db<'c>>>,
-    ) -> Vec<alpm::Package<'c>> {
-        let dbs = alpm.syncdbs();
-
-        if let Some(local) = local {
-            local.iter().flat_map(|db| db.pkgs()).collect()
-        } else {
-            alpm.localdb()
-                .pkgs()
-                .into_iter()
-                .filter(|p| dbs.pkg(p.name()).is_err())
-                .collect()
-        }
-    }
-
-    /// Get aur packages need to be updated.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use aur_depends::{Error, Updates};
-    /// # #[tokio::test]
-    /// # async fn run() -> Result<(), Error> {
-    /// use std::collections::HashSet;
-    /// use alpm::Alpm;
-    /// use raur::Handle;
-    ///
-    /// use aur_depends::{Flags, Resolver};
-    ///
-    /// let alpm = Alpm::new("/", "/var/lib/pacman")?;
-    /// let raur = Handle::default();
-    /// let mut cache = HashSet::new();
-    /// let mut resolver = Resolver::new(&alpm, Vec::new(), &mut cache, &raur, Flags::aur_only());
-    ///
-    /// let updates = resolver.updates().await?;
-    ///
-    /// for update in updates.aur_updates {
-    ///     println!("update: {}: {} -> {}", update.local.name(), update.local.version(),
-    ///     update.remote.version);
-    /// }
-    /// # Ok (())
-    /// # }
-    /// ```
-    pub async fn updates(&mut self, local: Option<&[&str]>) -> Result<Updates<'a>, Error> {
-        let local = match local {
-            Some(local) => {
-                let mut local_dbs = self.alpm.syncdbs().to_list_mut();
-                local_dbs.retain(|db| local.into_iter().any(|name| *name == db.name()));
-                Some(local_dbs)
-            }
-            None => None,
-        };
-
-        let targets = Self::update_targs(self.alpm, local.as_ref().map(|l| l.as_list()));
-        let (mut pkgbuilds, mut aur) = targets
-            .into_iter()
-            .partition::<Vec<_>, _>(|p| self.is_pkgbuild(p.name()));
-
-        if !self.flags.contains(Flags::AUR) {
-            aur.clear();
-        }
-        if !self.flags.contains(Flags::PKGBUILDS) {
-            pkgbuilds.clear();
-        }
-
-        let aur_pkg_names = aur.iter().map(|pkg| pkg.name()).collect::<Vec<_>>();
-        self.raur
-            .cache_info(self.cache, &aur_pkg_names)
-            .await
-            .map_err(|e| Error::Raur(Box::new(e)))?;
-
-        let mut updates = Updates::default();
-
-        for local in pkgbuilds {
-            let (repo, srcinfo, remote) = self.find_pkgbuild(local.name()).unwrap();
-
-            let should_upgrade = if self.flags.contains(Flags::ENABLE_DOWNGRADE) {
-                Version::new(srcinfo.version()) != local.version()
-            } else {
-                Version::new(srcinfo.version()) > local.version()
-            };
-            if !should_upgrade {
-                continue;
-            }
-
-            let update = PkgbuildUpdate {
-                local,
-                repo: repo.to_string(),
-                remote_srcinfo: srcinfo,
-                remote_pkg: remote,
-            };
-
-            if local.should_ignore() {
-                updates.ignored_pkgbuild.push(update);
-            } else {
-                updates.pkgbuild_updates.push(update);
-            }
-        }
-
-        for local in aur {
-            if let Some(pkg) = self.cache.get(local.name()) {
-                let should_upgrade = if self.flags.contains(Flags::ENABLE_DOWNGRADE) {
-                    Version::new(&*pkg.version) != local.version()
-                } else {
-                    Version::new(&*pkg.version) > local.version()
-                };
-                if !should_upgrade {
-                    continue;
-                }
-
-                let should_ignore = local.should_ignore();
-
-                let update = AurUpdate {
-                    local,
-                    remote: pkg.clone(),
-                };
-
-                if should_ignore {
-                    updates.ignored_aur.push(update);
-                } else {
-                    updates.aur_updates.push(update);
-                }
-            } else {
-                updates.missing.push(local);
-            }
-        }
-
-        Ok(updates)
     }
 
     /// Resolve a list of targets.
@@ -518,7 +299,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 }
             }
 
-            if self.flags.contains(Flags::NATIVE_REPO) || !is_target {
+            if self.flags.contains(Flags::REPO) || !is_target {
                 if let Some(alpm_pkg) = self.find_repo_satisfier(pkg.pkg) {
                     repo_targets.push((pkg, alpm_pkg));
                     continue;
@@ -1414,7 +1195,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         }));
     }
 
-    fn find_pkgbuild(
+    pub(crate) fn find_pkgbuild(
         &self,
         name: &str,
     ) -> Option<(&'a str, &'a srcinfo::Srcinfo, &'a srcinfo::Package)> {
@@ -1430,7 +1211,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         None
     }
 
-    fn is_pkgbuild(&self, name: &str) -> bool {
+    pub(crate) fn is_pkgbuild(&self, name: &str) -> bool {
         self.find_pkgbuild(name).is_some()
     }
 

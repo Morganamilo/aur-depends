@@ -8,12 +8,14 @@
 
 mod actions;
 mod base;
+mod cb;
 mod error;
 mod pkgbuild;
 mod resolve;
 mod satisfies;
 #[cfg(test)]
 mod tests;
+mod upgrade;
 
 pub use crate::actions::*;
 pub use crate::base::*;
