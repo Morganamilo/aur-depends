@@ -8,7 +8,7 @@ use crate::{AurBase, Error, Pkgbuild, PkgbuildPackages};
 use std::collections::HashSet;
 
 use alpm::{Alpm, Dep, Depend, Version};
-use alpm_utils::{AsTarg, Targ};
+use alpm_utils::{AsTarg, DbListExt, Targ};
 use bitflags::bitflags;
 use log::Level::Debug;
 use log::{debug, log_enabled};
@@ -17,6 +17,21 @@ use raur::{ArcPackage, Cache, Raur, SearchBy};
 // TODO: pkgbuild repo will not bundle pkg specific deps, which means a package from a srcinfo
 // already in build may not actually already be fully satisfied. check for this and if not push it
 // as a new pkgbase
+
+enum RepoSource {
+    Repo,
+    Pkgbuild,
+    Aur,
+    Unspecified,
+    Missing,
+}
+
+#[derive(Default)]
+struct Targets<'t, 'a> {
+    repo: Vec<(Targ<'t>, alpm::Package<'a>)>,
+    pkgbuild: Vec<Targ<'t>>,
+    aur: Vec<&'t str>,
+}
 
 bitflags! {
     /// Config options for Handle.
@@ -259,49 +274,50 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         self.resolve(deps, make_deps, false).await
     }
 
-    async fn resolve<T: AsTarg>(
-        mut self,
-        deps: &[T],
-        make_deps: &[T],
+    // parse <repo> part of target and figure out where target is
+    fn where_is_target(&self, targ: Targ) -> RepoSource {
+        if let Some(repo) = targ.repo {
+            if self.alpm.syncdbs().into_iter().any(|db| db.name() == repo) {
+                RepoSource::Repo
+            } else if self.repos.iter().any(|r| r.name == repo) {
+                RepoSource::Pkgbuild
+            } else if Some(repo) == self.aur_namespace.as_deref() {
+                RepoSource::Aur
+            } else {
+                RepoSource::Missing
+            }
+        } else {
+            RepoSource::Unspecified
+        }
+    }
+
+    fn split_targets<'t, T: AsTarg>(
+        &mut self,
+        deps: &'t [T],
+        make_deps: &'t [T],
         is_target: bool,
-    ) -> Result<Actions<'a>, Error> {
-        let mut aur_targets = Vec::new();
-        let mut repo_targets = Vec::new();
-        let mut pkgbuild_repo_targets = Vec::new();
+    ) -> Targets<'t, 'a> {
+        let mut targets = Targets::default();
 
-        let make = make_deps
-            .iter()
-            .map(|t| t.as_targ().pkg)
-            .collect::<HashSet<&str>>();
-        let localdb = self.alpm.localdb();
+        let use_repo = self.flags.contains(Flags::REPO) || !is_target;
+        let use_pkgbuild = self.flags.contains(Flags::PKGBUILDS) || !is_target;
+        let use_aur = self.flags.contains(Flags::AUR) || !is_target;
 
-        'deps: for pkg in deps.iter().chain(make_deps) {
-            let pkg = pkg.as_targ();
+        'deps: for targ in deps.iter().chain(make_deps) {
+            let targ = targ.as_targ();
             // TODO
             // Not handle repo/pkg for !is_target
 
-            let dep = Depend::new(pkg.to_string());
+            let dep = Depend::new(targ.to_string());
             if !is_target && self.assume_installed(&dep) {
                 continue;
             }
 
-            if self.aur_namespace.is_some() && pkg.repo == self.aur_namespace.as_deref() {
-                aur_targets.push(pkg.pkg);
-                continue;
-            }
+            let source = self.where_is_target(targ);
 
-            if self.flags.contains(Flags::PKGBUILDS) || !is_target {
-                for repo in &self.repos {
-                    if pkg.repo == Some(repo.name) {
-                        pkgbuild_repo_targets.push(pkg);
-                        continue 'deps;
-                    }
-                }
-            }
-
-            if self.flags.contains(Flags::REPO) || !is_target {
-                if let Some(alpm_pkg) = self.find_repo_satisfier(pkg.pkg) {
-                    repo_targets.push((pkg, alpm_pkg));
+            if matches!(source, RepoSource::Repo | RepoSource::Unspecified) && use_repo {
+                if let Some(alpm_pkg) = self.find_repo_target_satisfier(targ) {
+                    targets.repo.push((targ, alpm_pkg));
                     continue;
                 }
 
@@ -310,18 +326,18 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                         .alpm
                         .syncdbs()
                         .iter()
-                        .filter(|db| pkg.repo.is_none() || pkg.repo.unwrap() == db.name())
-                        .filter_map(|db| db.group(pkg.pkg).map(|group| Group { db, group }).ok())
+                        .filter(|db| targ.repo.is_none() || targ.repo.unwrap() == db.name())
+                        .filter_map(|db| db.group(targ.pkg).map(|group| Group { db, group }).ok())
                         .collect::<Vec<_>>();
                     if !groups.is_empty() {
                         if let Some(f) = self.group_callback.get() {
                             for alpm_pkg in f(&groups) {
-                                repo_targets.push((pkg, alpm_pkg));
+                                targets.repo.push((targ, alpm_pkg));
                             }
                         } else {
                             for group in groups {
                                 for alpm_pkg in group.group.packages() {
-                                    repo_targets.push((pkg, alpm_pkg));
+                                    targets.repo.push((targ, alpm_pkg));
                                 }
                             }
                         }
@@ -330,75 +346,71 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 }
             }
 
-            if self.flags.contains(Flags::PKGBUILDS) || !is_target {
+            if matches!(source, RepoSource::Pkgbuild | RepoSource::Unspecified) && use_pkgbuild {
                 for repo in &self.repos {
-                    if pkg.repo.is_some() && pkg.repo != Some(repo.name) {
+                    if targ.repo.is_some() && targ.repo != Some(repo.name) {
                         continue;
                     }
 
                     for base in &repo.pkgs {
-                        if base.satisfies_dep(
-                            &Depend::new(pkg.pkg),
+                        if let Some(_satisfier) = base.which_satisfies_dep(
+                            &Depend::new(targ.pkg),
                             self.flags.contains(Flags::NO_DEP_VERSION),
                         ) {
-                            pkgbuild_repo_targets.push(pkg);
+                            targets.pkgbuild.push(targ);
                             continue 'deps;
                         }
                     }
                 }
             }
 
-            if pkg.repo.is_none() && (self.flags.contains(Flags::AUR) || !is_target) {
-                aur_targets.push(pkg.pkg);
+            if matches!(source, RepoSource::Aur | RepoSource::Unspecified) && use_aur {
+                targets.aur.push(targ.pkg);
                 continue;
             }
 
             self.actions.missing.push(Missing {
-                dep: pkg.to_string(),
+                dep: targ.to_string(),
                 stack: Vec::new(),
             });
         }
 
-        debug!("aur targets are {:?}", aur_targets);
-        debug!("pkgbuild targets are {:?}", pkgbuild_repo_targets);
+        targets
+    }
 
-        self.cache_aur_pkgs_recursive(&aur_targets, &pkgbuild_repo_targets, true)
+    async fn resolve<T: AsTarg>(
+        mut self,
+        deps: &[T],
+        make_deps: &[T],
+        is_target: bool,
+    ) -> Result<Actions<'a>, Error> {
+        let targets = self.split_targets(deps, make_deps, is_target);
+
+        let make = make_deps
+            .iter()
+            .map(|t| t.as_targ().pkg)
+            .collect::<HashSet<&str>>();
+
+        debug!("aur targets are {:?}", targets.aur);
+        debug!("pkgbuild targets are {:?}", targets.pkgbuild);
+
+        self.cache_aur_pkgs_recursive(&targets.aur, &targets.pkgbuild, true)
             .await?;
         self.resolved.clear();
 
-        for (pkg, alpm_pkg) in repo_targets {
-            if !is_target && localdb.pkgs().find_satisfier(pkg.pkg).is_some() {
-                continue;
-            }
-
-            if self.flags.contains(Flags::NEEDED) {
-                if let Ok(local) = localdb.pkg(alpm_pkg.name()) {
-                    if local.version() >= alpm_pkg.version() {
-                        let unneeded = Unneeded::new(pkg.to_string(), local.version().to_string());
-                        self.actions.unneeded.push(unneeded);
-                        continue;
-                    }
-                }
-            }
-
-            let is_make = make.contains(&pkg.pkg);
-
-            self.stack
-                .push(new_want(alpm_pkg.name().to_string(), pkg.pkg.to_string()));
-            self.resolve_repo_pkg(alpm_pkg, is_target, is_make)?;
-            self.stack.pop().unwrap();
-        }
-
         debug!("Caching done, building tree");
         debug!("cache: {:#?}", self.cache);
-        debug!("targets: {:?}", aur_targets);
 
-        for &pkg in &pkgbuild_repo_targets {
-            self.resolve_pkgbuild_target(pkg, &make, is_target, &aur_targets)?;
+        for (pkg, alpm_pkg) in targets.repo {
+            self.resolve_repo_target(pkg, alpm_pkg, &make, is_target)
         }
 
-        for &aur_pkg in &aur_targets {
-            self.resolve_aur_target(aur_pkg, &make, is_target, &aur_targets)?;
+        for &pkg in &targets.pkgbuild {
+            self.resolve_pkgbuild_target(pkg, &make, is_target, &targets.aur)?;
+        }
+
+        for &aur_pkg in &targets.aur {
+            self.resolve_aur_target(aur_pkg, &make, is_target, &targets.aur)?;
         }
 
         if self.flags.contains(Flags::CALCULATE_MAKE) {
@@ -449,7 +461,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
         let is_make = make.contains(&aur_pkg);
         self.stack
-            .push(new_want(pkg.name.to_string(), aur_pkg.to_string()));
+            .push(DepMissing::new(pkg.name.to_string(), aur_pkg.to_string()));
         self.resolve_aur_pkg_deps(targs, AurOrPkgbuild::Aur(&pkg), is_make)?;
         self.stack.pop().unwrap();
 
@@ -472,6 +484,39 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
         self.push_aur_build(&pkg.package_base, p);
         Ok(())
+    }
+
+    fn resolve_repo_target(
+        &mut self,
+        pkg: Targ,
+        alpm_pkg: alpm::Package<'a>,
+        make: &HashSet<&str>,
+        is_target: bool,
+    ) {
+        let localdb = self.alpm.localdb();
+
+        if !is_target && localdb.pkgs().find_satisfier(pkg.pkg).is_some() {
+            return;
+        }
+
+        if self.flags.contains(Flags::NEEDED) {
+            if let Ok(local) = localdb.pkg(alpm_pkg.name()) {
+                if local.version() >= alpm_pkg.version() {
+                    let unneeded = Unneeded::new(pkg.to_string(), local.version().to_string());
+                    self.actions.unneeded.push(unneeded);
+                    return;
+                }
+            }
+        }
+
+        let is_make = make.contains(&pkg.pkg);
+
+        self.stack.push(DepMissing::new(
+            alpm_pkg.name().to_string(),
+            pkg.pkg.to_string(),
+        ));
+        self.resolve_repo_pkg(alpm_pkg, is_target, is_make);
+        self.stack.pop().unwrap();
     }
 
     fn resolve_pkgbuild_target(
@@ -522,8 +567,10 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         let pkg = pkg.clone();
         let repo = repo.to_string();
         let is_make = make.contains(&pkgbuild.pkg);
-        self.stack
-            .push(new_want(pkg.pkgname.to_string(), pkgbuild.pkg.to_string()));
+        self.stack.push(DepMissing::new(
+            pkg.pkgname.to_string(),
+            pkgbuild.pkg.to_string(),
+        ));
         self.resolve_aur_pkg_deps(targs, AurOrPkgbuild::Pkgbuild(&repo, &base, &pkg), is_make)?;
         self.stack.pop().unwrap();
 
@@ -650,8 +697,9 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                     let depstr = dep.to_string();
                     if let Some(pkg) = self.find_repo_satisfier(&depstr) {
                         if !self.satisfied_local(&dep) {
-                            self.stack.push(new_want(pkg.name().to_string(), depstr));
-                            self.resolve_repo_pkg(pkg, false, true)?;
+                            self.stack
+                                .push(DepMissing::new(pkg.name().to_string(), depstr));
+                            self.resolve_repo_pkg(pkg, false, true);
                             self.stack.pop().unwrap();
                         }
                         continue;
@@ -667,7 +715,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                     let base = base.clone();
                     let pkg = pkg.clone();
                     self.stack
-                        .push(new_want(pkg.pkgname.to_string(), dep.to_string()));
+                        .push(DepMissing::new(pkg.pkgname.to_string(), dep.to_string()));
                     self.resolve_aur_pkg_deps(
                         targs,
                         AurOrPkgbuild::Pkgbuild(&repo, &base, &pkg),
@@ -708,7 +756,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 };
 
                 self.stack
-                    .push(new_want(sat_pkg.name.to_string(), dep.to_string()));
+                    .push(DepMissing::new(sat_pkg.name.to_string(), dep.to_string()));
                 self.resolve_aur_pkg_deps(targs, AurOrPkgbuild::Aur(&sat_pkg), true)?;
                 self.stack.pop();
 
@@ -763,14 +811,9 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         false
     }
 
-    fn resolve_repo_pkg(
-        &mut self,
-        pkg: alpm::Package<'a>,
-        target: bool,
-        make: bool,
-    ) -> Result<(), Error> {
+    fn resolve_repo_pkg(&mut self, pkg: alpm::Package<'a>, target: bool, make: bool) {
         if !self.seen.insert(pkg.name().to_string()) {
-            return Ok(());
+            return;
         }
 
         if !self.flags.contains(Flags::NO_DEPS) {
@@ -784,8 +827,8 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
                 if let Some(pkg) = self.find_repo_satisfier(dep.to_string()) {
                     self.stack
-                        .push(new_want(pkg.name().to_string(), dep.to_string()));
-                    self.resolve_repo_pkg(pkg, false, true)?;
+                        .push(DepMissing::new(pkg.name().to_string(), dep.to_string()));
+                    self.resolve_repo_pkg(pkg, false, true);
                     self.stack.pop().unwrap();
                 } else {
                     self.actions.missing.push(Missing {
@@ -798,8 +841,6 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
         debug!("pushing to install: {}", pkg.name());
         self.actions.install.push(RepoPackage { pkg, make, target });
-
-        Ok(())
     }
 
     async fn cache_aur_pkgs<S: AsRef<str>>(
@@ -1104,6 +1145,20 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         }
     }
 
+    fn find_repo_target_satisfier(&self, mut target: Targ) -> Option<alpm::Package<'a>> {
+        if self.flags.contains(Flags::NO_DEP_VERSION) {
+            target = Targ {
+                repo: target.repo,
+                pkg: target
+                    .pkg
+                    .split_once(is_ver_char)
+                    .map_or(target.pkg, |x| x.0),
+            };
+        }
+
+        self.alpm.syncdbs().find_target_satisfier(target)
+    }
+
     fn find_repo_satisfier<S: AsRef<str>>(&self, target: S) -> Option<alpm::Package<'a>> {
         let mut target = target.as_ref();
 
@@ -1325,13 +1380,6 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
 fn is_ver_char(c: char) -> bool {
     matches!(c, '<' | '=' | '>')
-}
-
-fn new_want(pkg: String, dep: String) -> DepMissing {
-    DepMissing {
-        dep: (pkg != dep).then_some(dep),
-        pkg,
-    }
 }
 
 #[cfg(test)]

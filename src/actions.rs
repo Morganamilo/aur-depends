@@ -137,6 +137,15 @@ pub struct DepMissing {
     pub dep: Option<String>,
 }
 
+impl DepMissing {
+    pub(crate) fn new(pkg: String, dep: String) -> DepMissing {
+        DepMissing {
+            dep: (pkg != dep).then_some(dep),
+            pkg,
+        }
+    }
+}
+
 /// A package that could not be resolved.
 #[derive(Debug, Clone, Default)]
 pub struct Missing {
