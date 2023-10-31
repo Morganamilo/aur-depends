@@ -4,7 +4,6 @@ use std::collections::{HashMap, HashSet};
 
 use alpm::{Alpm, Dep, DepMod, Depend};
 use raur::ArcPackage;
-use srcinfo::Srcinfo;
 
 type ConflictMap = HashMap<String, Conflict>;
 
@@ -128,43 +127,6 @@ impl Conflict {
     }
 }
 
-/// An AUR package that should be updated.
-#[derive(Debug)]
-pub struct AurUpdate<'a> {
-    /// The local package.
-    pub local: alpm::Package<'a>,
-    /// The AUR package.
-    pub remote: ArcPackage,
-}
-
-/// An pkgbuild2 should be updated.
-#[derive(Debug)]
-pub struct PkgbuildUpdate<'a> {
-    /// The local package.
-    pub local: alpm::Package<'a>,
-    /// The pkgbuild repo the package belongs to.
-    pub repo: String,
-    /// The pkgbuild package base srcinfo.
-    pub remote_srcinfo: &'a Srcinfo,
-    /// The pkgbuild package base package,
-    pub remote_pkg: &'a srcinfo::Package,
-}
-
-/// Collection of AUR updates and missing packages
-#[derive(Debug, Default)]
-pub struct Updates<'a> {
-    /// The aur updates.
-    pub aur_updates: Vec<AurUpdate<'a>>,
-    /// The pkgbuild updates.
-    pub pkgbuild_updates: Vec<PkgbuildUpdate<'a>>,
-    /// Packages that matched ignore pkg/group.
-    pub ignored_aur: Vec<AurUpdate<'a>>,
-    /// Packages that matched ignore pkg/group.
-    pub ignored_pkgbuild: Vec<PkgbuildUpdate<'a>>,
-    /// Foreign that were not found in the AUR or elsewhere.
-    pub missing: Vec<alpm::Package<'a>>,
-}
-
 /// Describes a package in the package stack.
 #[derive(Debug, Clone, Default)]
 pub struct DepMissing {
@@ -173,6 +135,15 @@ pub struct DepMissing {
     /// The dep string that pulled in the package. If it was different
     /// from the package name.
     pub dep: Option<String>,
+}
+
+impl DepMissing {
+    pub(crate) fn new(pkg: String, dep: String) -> DepMissing {
+        DepMissing {
+            dep: (pkg != dep).then_some(dep),
+            pkg,
+        }
+    }
 }
 
 /// A package that could not be resolved.
