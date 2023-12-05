@@ -681,19 +681,18 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 if self.assume_installed(&dep)
                     || self.satisfied_build(&dep)
                     || self.resolved.contains(&dep.to_string())
+                    || self.satisfied_install(&dep)
                 {
                     continue;
                 }
 
                 let is_aur_targ = self.dep_is_aur_targ(targs, &dep);
-
-                if self.satisfied_install(&dep) {
-                    continue;
-                }
-
                 self.resolved.insert(dep.to_string());
 
                 if !is_aur_targ {
+                    if self.satisfied_local(&dep) {
+                        continue;
+                    }
                     let depstr = dep.to_string();
                     if let Some(pkg) = self.find_repo_satisfier(&depstr) {
                         if !self.satisfied_local(&dep) {
