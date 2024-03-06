@@ -35,6 +35,7 @@ struct Targets<'t, 'a> {
 
 bitflags! {
     /// Config options for Handle.
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub struct Flags: u32 {
         /// Do not resolve dependencies.
         const NO_DEPS = 1 << 2;
