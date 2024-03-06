@@ -16,8 +16,8 @@ exclude = ["tests"]
 features = [ "docs-rs" ]
 
 [dependencies]
-alpm = "2.2.1"
-alpm-utils = "2.0.0"
+alpm = "3.0.2"
+alpm-utils = "3.0.0"
 log = "0.4.16"
 raur = { version = "7.0.0", default-features = false, features = ["async"] }
 bitflags = "1.3.2"
@@ -34,7 +34,3 @@ generate = ["alpm/generate", "alpm-utils/generate"]
 rustls-tls = ["raur/rustls-tls"]
 docs-rs = ["alpm/docs-rs"]
 default = ["raur/default"]
-
-
-[patch.crates-io]
-alpm = { git = "https://github.com/archlinux/alpm.rs", rev = "101b05" }

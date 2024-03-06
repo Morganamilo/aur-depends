@@ -8,15 +8,15 @@ use crate::Resolver;
 pub(crate) struct Callback<F: ?Sized>(pub(crate) Option<Box<F>>);
 
 pub(crate) type ProviderCB = Callback<dyn Fn(&str, &[&str]) -> usize + 'static>;
-pub(crate) type GroupCB<'a> = Callback<dyn Fn(&[Group<'a>]) -> Vec<alpm::Package<'a>> + 'static>;
+pub(crate) type GroupCB<'a> = Callback<dyn Fn(&[Group<'a>]) -> Vec<&'a alpm::Package> + 'static>;
 pub(crate) type IsDevelCb = Callback<dyn Fn(&str) -> bool + 'static>;
 
 /// An alpm Db+Group pair passed to the group callback.
 pub struct Group<'a> {
     /// The db the group belongs to.
-    pub db: Db<'a>,
+    pub db: &'a Db,
     /// The group.
-    pub group: alpm::Group<'a>,
+    pub group: &'a alpm::Group,
 }
 
 impl<T: ?Sized> fmt::Debug for Callback<T> {
@@ -59,7 +59,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     /// The group callback is called whenever a group is processed. The callback recieves the group
     /// and returns a list of packages should be installed from the group;
     ///
-    pub fn group_callback<F: Fn(&[Group<'a>]) -> Vec<alpm::Package<'a>> + 'static>(
+    pub fn group_callback<F: Fn(&[Group<'a>]) -> Vec<&'a alpm::Package> + 'static>(
         mut self,
         f: F,
     ) -> Self {
