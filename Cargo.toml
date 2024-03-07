@@ -16,8 +16,8 @@ exclude = ["tests"]
 features = [ "docs-rs" ]
 
 [dependencies]
-alpm = "3.0.2"
-alpm-utils = "3.0.0"
+alpm = "3.0.4"
+alpm-utils = "3.0.2"
 log = "0.4.16"
 raur = { version = "7.0.0", default-features = false, features = ["async"] }
 bitflags = "2.4.2"
