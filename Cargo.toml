@@ -18,15 +18,15 @@ features = [ "docs-rs" ]
 [dependencies]
 alpm = "3.0.4"
 alpm-utils = "3.0.2"
-log = "0.4.16"
+log = "0.4.21"
 raur = { version = "7.0.0", default-features = false, features = ["async"] }
 bitflags = "2.4.2"
-srcinfo = "1.0.0"
+srcinfo = "1.1.0"
 
 [dev-dependencies]
-async-trait = "0.1.53"
-simplelog = "0.11.2"
-tokio = { version = "1.17.0", features = ["macros", "rt"] }
+async-trait = "0.1.77"
+simplelog = "0.12.2"
+tokio = { version = "1.36.0", features = ["macros", "rt"] }
 
 [features]
 git = ["alpm/git", "alpm-utils/git"]
