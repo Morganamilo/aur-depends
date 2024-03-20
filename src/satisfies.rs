@@ -1,4 +1,4 @@
-use alpm::{AsDep, Dep, Depend, Ver, Version};
+use alpm::{Dep, Depend, Ver, Version};
 use alpm_utils::depends;
 
 pub trait Satisfies {
@@ -23,7 +23,7 @@ impl Satisfies for raur::Package {
     }
 }
 
-impl<'a> Satisfies for alpm::Package<'a> {
+impl Satisfies for alpm::Package {
     fn which_satisfies_dep(&self, dep: &Dep, nover: bool) -> Option<&str> {
         satisfies(
             dep,
@@ -77,7 +77,7 @@ impl Satisfies for (&srcinfo::Srcinfo, &srcinfo::Package) {
     }
 }
 
-pub fn satisfies<D: AsDep, S: AsRef<str>, V: AsRef<Ver>>(
+pub fn satisfies<D: AsRef<Dep>, S: AsRef<str>, V: AsRef<Ver>>(
     dep: &Dep,
     name: S,
     version: V,

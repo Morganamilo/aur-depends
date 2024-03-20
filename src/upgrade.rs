@@ -12,7 +12,7 @@ use raur::Raur;
 #[derive(Debug)]
 pub struct AurUpdate<'a> {
     /// The local package.
-    pub local: alpm::Package<'a>,
+    pub local: &'a alpm::Package,
     /// The AUR package.
     pub remote: ArcPackage,
 }
@@ -21,7 +21,7 @@ pub struct AurUpdate<'a> {
 #[derive(Debug)]
 pub struct PkgbuildUpdate<'a> {
     /// The local package.
-    pub local: alpm::Package<'a>,
+    pub local: &'a alpm::Package,
     /// The pkgbuild repo the package belongs to.
     pub repo: String,
     /// The pkgbuild package base srcinfo.
@@ -42,7 +42,7 @@ pub struct Updates<'a> {
     /// Packages that matched ignore pkg/group.
     pub pkgbuild_ignored: Vec<PkgbuildUpdate<'a>>,
     /// Packages that were not found in the AUR or elsewhere.
-    pub missing: Vec<alpm::Package<'a>>,
+    pub missing: Vec<&'a alpm::Package>,
 }
 
 impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sync>
@@ -50,8 +50,8 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 {
     fn update_targs<'c>(
         alpm: &'c Alpm,
-        local: Option<AlpmList<'c, alpm::Db<'c>>>,
-    ) -> Vec<alpm::Package<'c>> {
+        local: Option<AlpmList<&'c alpm::Db>>,
+    ) -> Vec<&'c alpm::Package> {
         let dbs = alpm.syncdbs();
 
         if let Some(local) = local {
@@ -103,7 +103,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             None => None,
         };
 
-        let targets = Self::update_targs(self.alpm, local.as_ref().map(|l| l.as_list()));
+        let targets = Self::update_targs(self.alpm, local.as_ref().map(|l| l.list()));
         let (mut pkgbuilds, mut aur) = targets
             .into_iter()
             .partition::<Vec<_>, _>(|p| self.is_pkgbuild(p.name()));

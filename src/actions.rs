@@ -86,7 +86,7 @@ pub type AurPackage = Package<ArcPackage>;
 pub type Pkgbuild = Package<srcinfo::Package>;
 
 /// Wrapper around alpm::Package for extra metadata.
-pub type RepoPackage<'a> = Package<alpm::Package<'a>>;
+pub type RepoPackage<'a> = Package<&'a alpm::Package>;
 
 /// A conflict
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]

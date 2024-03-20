@@ -28,13 +28,14 @@ enum RepoSource {
 
 #[derive(Default)]
 struct Targets<'t, 'a> {
-    repo: Vec<(Targ<'t>, alpm::Package<'a>)>,
+    repo: Vec<(Targ<'t>, &'a alpm::Package)>,
     pkgbuild: Vec<Targ<'t>>,
     aur: Vec<&'t str>,
 }
 
 bitflags! {
     /// Config options for Handle.
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub struct Flags: u32 {
         /// Do not resolve dependencies.
         const NO_DEPS = 1 << 2;
@@ -489,7 +490,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     fn resolve_repo_target(
         &mut self,
         pkg: Targ,
-        alpm_pkg: alpm::Package<'a>,
+        alpm_pkg: &'a alpm::Package,
         make: &HashSet<&str>,
         is_target: bool,
     ) {
@@ -690,7 +691,9 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 self.resolved.insert(dep.to_string());
 
                 if !is_aur_targ {
-                    if self.satisfied_local(&dep) {
+                    if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS)
+                        && self.satisfied_local(&dep)
+                    {
                         continue;
                     }
                     let depstr = dep.to_string();
@@ -797,11 +800,11 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         if is_target {
             return false;
         }
-        if self.assume_installed(dep) {
-            return true;
-        }
         if self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS) {
             return false;
+        }
+        if self.assume_installed(dep) {
+            return true;
         }
         if self.satisfied_local(dep) {
             return true;
@@ -810,7 +813,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         false
     }
 
-    fn resolve_repo_pkg(&mut self, pkg: alpm::Package<'a>, target: bool, make: bool) {
+    fn resolve_repo_pkg(&mut self, pkg: &'a alpm::Package, target: bool, make: bool) {
         if !self.seen.insert(pkg.name().to_string()) {
             return;
         }
@@ -1112,7 +1115,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         }
     }
 
-    fn find_repo_target_satisfier(&self, mut target: Targ) -> Option<alpm::Package<'a>> {
+    fn find_repo_target_satisfier(&self, mut target: Targ) -> Option<&'a alpm::Package> {
         if self.flags.contains(Flags::NO_DEP_VERSION) {
             target = Targ {
                 repo: target.repo,
@@ -1126,7 +1129,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         self.alpm.syncdbs().find_target_satisfier(target)
     }
 
-    fn find_repo_satisfier<S: AsRef<str>>(&self, target: S) -> Option<alpm::Package<'a>> {
+    fn find_repo_satisfier<S: AsRef<str>>(&self, target: S) -> Option<&'a alpm::Package> {
         let mut target = target.as_ref();
 
         if self.flags.contains(Flags::NO_DEP_VERSION) {
@@ -1136,7 +1139,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         self.alpm.syncdbs().find_satisfier(target)
     }
 
-    fn find_repo_satisfier_silent<S: AsRef<str>>(&self, target: S) -> Option<alpm::Package<'a>> {
+    fn find_repo_satisfier_silent<S: AsRef<str>>(&self, target: S) -> Option<&'a alpm::Package> {
         let cb = self.alpm.take_raw_question_cb();
         let pkg = self.find_repo_satisfier(target);
         self.alpm.set_raw_question_cb(cb);
