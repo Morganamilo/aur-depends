@@ -1720,6 +1720,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_override_dep_via_target() {
+        let TestActions { install, build, .. } = resolve(&["perl-mailtools"], Flags::new()).await;
+        assert_eq!(install, ["perl-mailtools", "perl-timedate"]);
+        assert!(build.is_empty());
+
+        let TestActions { install, build, .. } =
+            resolve(&["perl-mailtools-git"], Flags::new()).await;
+        assert_eq!(install, ["perl-timedate"]);
+        assert_eq!(build, ["perl-mailtools-git"]);
+
+        let TestActions { install, build, .. } =
+            resolve(&["perl-timedate-git"], Flags::new()).await;
+        assert!(install.is_empty());
+        assert_eq!(build, ["perl-timedate-git"]);
+
+        let TestActions { install, build, .. } =
+            resolve(&["perl-timedate-git", "perl-mailtools-git"], Flags::new()).await;
+        assert!(install.is_empty());
+        assert_eq!(build, ["perl-mailtools-git", "perl-timedate-git"]);
+
+        let TestActions { install, build, .. } =
+            resolve(&["perl-mailtools-git", "perl-timedate-git"], Flags::new()).await;
+        assert!(install.is_empty());
+        assert_eq!(build, ["perl-mailtools-git", "perl-timedate-git"]);
+    }
+
+    #[tokio::test]
     async fn test_a() {
         let TestActions { missing, .. } = resolve(&["a"], Flags::new()).await;
 

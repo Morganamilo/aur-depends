@@ -3310,5 +3310,10 @@ pub fn raur() -> impl Raur<Err = raur::Error> {
 
     raur.pkg("wants-pacaur").depend("pacaur");
 
+    raur.pkg("perl-mailtools-git")
+        .provide("perl-mailtools")
+        .depend("perl-timedate");
+    raur.pkg("perl-timedate-git").provide("perl-timedate");
+
     raur
 }
