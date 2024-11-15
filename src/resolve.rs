@@ -1005,7 +1005,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         if let Some((repo, base, pkg)) = self.find_pkgbuild_repo_dep(targ.repo, &pkg) {
             let arch = self.alpm.architectures().first().unwrap_or("");
             let pkgbuild = AurOrPkgbuild::Pkgbuild(repo, base, pkg);
-            let deps = pkgbuild.depends(arch, self.flags.contains(Flags::NO_DEP_VERSION));
+            let deps = pkgbuild.depends(arch, self.flags.contains(Flags::CHECK_DEPENDS));
 
             for pkg in deps {
                 let dep = Depend::new(pkg);
