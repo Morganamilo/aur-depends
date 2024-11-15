@@ -994,108 +994,76 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         Ok(())
     }
 
-    fn find_aur_deps_of_pkgbuild(&mut self, targ: Targ<'_>) -> Vec<String> {
-        let mut ret = Vec::new();
-        if self.flags.contains(Flags::NO_DEPS) {
-            return Vec::new();
-        }
-        let mut new_resolved = HashSet::new();
-
-        let pkg = Depend::new(targ.pkg);
-        if let Some((repo, base, pkg)) = self.find_pkgbuild_repo_dep(targ.repo, &pkg) {
-            let arch = self.alpm.architectures().first().unwrap_or("");
-            let pkgbuild = AurOrPkgbuild::Pkgbuild(repo, base, pkg);
-            let deps = pkgbuild.depends(arch, self.flags.contains(Flags::NO_DEP_VERSION));
-
-            for pkg in deps {
-                let dep = Depend::new(pkg);
-
-                if self.resolved.contains(&dep.to_string()) {
-                    continue;
-                }
-                if self.find_repo_satisfier_silent(pkg).is_some() {
-                    continue;
-                }
-                if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS) {
-                    if self.satisfied_local(&dep) {
-                        continue;
-                    }
-                } else if self.assume_installed(&dep) {
-                    continue;
-                }
-
-                new_resolved.insert(dep.to_string());
-                ret.push(pkg.to_string());
-            }
-        }
-
-        self.resolved.extend(new_resolved);
-        ret
-    }
-
     async fn cache_aur_pkgs_recursive2<S: AsRef<str>>(
         &mut self,
         pkgs: &[S],
         pkgbuild_pkgs: &[Targ<'_>],
         target: bool,
     ) -> Result<Vec<String>, Error> {
-        let pkgs = pkgbuild_pkgs
-            .iter()
-            .flat_map(|p| self.find_aur_deps_of_pkgbuild(*p))
-            .chain(pkgs.iter().map(|p| p.as_ref().to_string()))
-            .collect::<Vec<_>>();
-
-        if pkgs.is_empty() {
-            return Ok(Vec::new());
-        }
-
         if log_enabled!(Debug) {
             debug!(
-                "cache_aur_pkgs_recursive {:?}",
-                pkgs.iter().collect::<Vec<_>>()
+                "cache_aur_pkgs_recursive {:?}, {:?}",
+                pkgs.iter().map(|p| p.as_ref()).collect::<Vec<_>>(),
+                pkgbuild_pkgs,
             )
         }
 
-        let pkgs = self.cache_aur_pkgs(&pkgs, target).await?;
+        let aur_cached_pkgs = self.cache_aur_pkgs(&pkgs, target).await?;
         if self.flags.contains(Flags::NO_DEPS) {
             return Ok(Vec::new());
         }
 
-        let mut new_pkgs = Vec::new();
-        for pkg in pkgs {
-            let check = if self.flags.contains(Flags::CHECK_DEPENDS) {
-                Some(&pkg.check_depends)
-            } else {
-                None
-            };
-
-            let depends = pkg
-                .depends
+        let deps_of_pkgbuild_pkgs = pkgbuild_pkgs
+            .into_iter()
+            .filter_map(|p| self.find_pkgbuild_repo_dep(p.repo, &Depend::new(p.pkg)))
+            .flat_map(|(repo, base, pkg)| {
+                AurOrPkgbuild::Pkgbuild(repo, base, pkg)
+                    .depends(
+                        self.alpm.architectures().first().unwrap_or(""),
+                        self.flags.contains(Flags::NO_DEP_VERSION),
+                    )
+                    .into_iter()
+                    .map(|s| s.to_owned())
+                    .collect::<Vec<_>>()
+            });
+        let deps_of_aur_cached_pkgs = aur_cached_pkgs.iter().flat_map(|pkg| {
+            pkg.depends
                 .iter()
                 .chain(&pkg.make_depends)
-                .chain(check.into_iter().flatten());
+                .chain(if self.flags.contains(Flags::CHECK_DEPENDS) {
+                    pkg.check_depends.iter()
+                } else {
+                    [].iter()
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        });
 
-            for pkg in depends {
+        let new_pkgs = deps_of_pkgbuild_pkgs
+            .chain(deps_of_aur_cached_pkgs.into_iter().map(|s| s.clone()))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .filter(|pkg| {
                 let dep = Depend::new(pkg.as_str());
 
                 if self.resolved.contains(&dep.to_string()) {
-                    continue;
+                    return false;
                 }
                 if self.find_repo_satisfier_silent(pkg).is_some() {
-                    continue;
+                    return false;
                 }
                 if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS) {
                     if self.satisfied_local(&dep) {
-                        continue;
+                        return false;
                     }
                 } else if self.assume_installed(&dep) {
-                    continue;
+                    return false;
                 }
 
-                self.resolved.insert(dep.to_string());
-                new_pkgs.push(pkg.clone());
-            }
-        }
+                true
+            })
+            .collect::<Vec<_>>();
+        self.resolved.extend(new_pkgs.iter().cloned());
 
         Ok(new_pkgs)
     }
