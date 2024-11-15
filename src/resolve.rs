@@ -194,6 +194,7 @@ pub struct Resolver<'a, 'b, H = raur::Handle> {
     pub(crate) raur: &'b H,
     pub(crate) actions: Actions<'a>,
     pub(crate) seen: HashSet<String>,
+    pub(crate) seen_target: HashSet<String>,
     pub(crate) flags: Flags,
     pub(crate) aur_namespace: Option<String>,
     pub(crate) provider_callback: ProviderCB,
@@ -224,6 +225,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             raur,
             flags,
             seen: HashSet::new(),
+            seen_target: HashSet::new(),
             aur_namespace: None,
             provider_callback: Default::default(),
             group_callback: Default::default(),
@@ -430,6 +432,8 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     ) -> Result<(), Error> {
         let dep = Depend::new(aur_pkg);
         let localdb = self.alpm.localdb();
+
+        self.seen_target.insert(aur_pkg.to_string());
 
         if self.should_skip_aur_pkg(&dep, is_target) {
             return Ok(());
@@ -1181,6 +1185,9 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     fn dep_is_aur_targ(&self, targs: &[&str], dep: &Dep) -> bool {
         if let Some(pkg) = self.find_satisfier_aur_cache(dep) {
             for &targ in targs {
+                if self.seen_target.contains(targ) {
+                    continue;
+                }
                 if pkg.satisfies_dep(
                     &Depend::new(targ),
                     self.flags.contains(Flags::NO_DEP_VERSION),
