@@ -1000,6 +1000,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             return Vec::new();
         }
         let mut new_resolved = HashSet::new();
+        let mut pkgbuilds = Vec::new();
 
         let pkg = Depend::new(targ.pkg);
         if let Some((repo, base, pkg)) = self.find_pkgbuild_repo_dep(targ.repo, &pkg) {
@@ -1023,10 +1024,18 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 } else if self.assume_installed(&dep) {
                     continue;
                 }
+                if self.find_pkgbuild_repo_dep(None, &dep).is_some() {
+                    pkgbuilds.push(dep.to_depend());
+                    continue;
+                }
 
                 new_resolved.insert(dep.to_string());
                 ret.push(pkg.to_string());
             }
+        }
+
+        for dep in pkgbuilds {
+            ret.extend(self.find_aur_deps_of_pkgbuild(Targ::new(None, &dep.to_string())));
         }
 
         self.resolved.extend(new_resolved);
