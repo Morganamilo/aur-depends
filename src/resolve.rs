@@ -93,6 +93,7 @@ impl Default for Flags {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 enum AurOrPkgbuild<'a> {
     Aur(&'a raur::Package),
     Pkgbuild(&'a str, &'a srcinfo::Srcinfo, &'a srcinfo::Package),
