@@ -606,6 +606,15 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     }
 
     fn find_satisfier_aur_cache(&self, dep: &Dep) -> Option<&ArcPackage> {
+        if let Some(pkg) = self
+            .cache
+            .iter()
+            .filter(|pkg| self.alpm.localdb().pkg(pkg.name.as_str()).is_ok())
+            .find(|pkg| pkg.satisfies_dep(dep, self.flags.contains(Flags::NO_DEP_VERSION)))
+        {
+            return Some(pkg);
+        }
+
         if let Some(pkg) = self.cache.get(dep.name()) {
             if pkg.satisfies_dep(dep, self.flags.contains(Flags::NO_DEP_VERSION)) {
                 return Some(pkg);
@@ -633,6 +642,10 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             debug!("satisfiers for '{:?}': {:?})", dep.to_string(), pkgs);
 
             if !target {
+                if let Some(pkg) = pkgs.iter().find(|&&p| self.alpm.localdb().pkg(p).is_ok()) {
+                    debug!("picked from cache: {}", pkg);
+                    return self.cache.get(*pkg);
+                }
                 if let Some(pkg) = pkgs.iter().find(|&&p| p == dep.name()) {
                     debug!("picked from cache: {}", pkg);
                     return self.cache.get(*pkg);
