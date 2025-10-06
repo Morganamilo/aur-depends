@@ -1,4 +1,4 @@
-use crate::{satisfies::Satisfies, Base};
+use crate::{Base, satisfies::Satisfies};
 
 use std::collections::{HashMap, HashSet};
 

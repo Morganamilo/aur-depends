@@ -689,11 +689,11 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         make: bool,
     ) -> Result<(), Error> {
         debug!("resolve pkgbuild repo pkg deps: {}", pkg.pkgbase());
+        let nover = self.flags.contains(Flags::NO_DEP_VERSION);
+        let arch = self.alpm.architectures().first().unwrap_or("");
+        let check = self.flags.contains(Flags::CHECK_DEPENDS);
         if !self.flags.contains(Flags::NO_DEPS) {
-            for dep_str in pkg.depends(
-                self.alpm.architectures().first().unwrap_or(""),
-                self.flags.contains(Flags::CHECK_DEPENDS),
-            ) {
+            for dep_str in pkg.depends(arch, check) {
                 debug!("depend: {}", dep_str);
                 let dep = Depend::new(dep_str.to_string());
 
@@ -705,10 +705,15 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                     continue;
                 }
 
-                let is_aur_targ = self.dep_is_aur_targ(targs, &dep);
+                let same_pkgbuild = matches!(pkg, AurOrPkgbuild::Pkgbuild(_, base, _) if base
+                        .which_satisfies_dep(&dep, nover)
+                        .is_some()
+                    && !self.pkgbuild_dep_in_base(&dep.to_string(), &base, arch, check));
+
+                let is_aur_targ = !same_pkgbuild && self.dep_is_aur_targ(targs, &dep);
                 self.resolved.insert(dep.to_string());
 
-                if !is_aur_targ {
+                if !is_aur_targ && !same_pkgbuild {
                     if !self.flags.contains(Flags::RESOLVE_SATISFIED_PKGBUILDS)
                         && self.satisfied_local(&dep)
                     {
@@ -726,7 +731,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                     }
                 }
 
-                if self.should_skip_aur_pkg(&dep, is_aur_targ) {
+                if !same_pkgbuild && self.should_skip_aur_pkg(&dep, is_aur_targ) {
                     continue;
                 }
 
@@ -1221,6 +1226,30 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         }
 
         false
+    }
+
+    fn pkgbuild_dep_in_base(
+        &self,
+        dep: &str,
+        base: &srcinfo::Srcinfo,
+        arch: &str,
+        check_depends: bool,
+    ) -> bool {
+        let check = if check_depends {
+            base.base.checkdepends.as_slice()
+        } else {
+            &[]
+        };
+
+        // TODO consider runtime deps?
+        // TODO doing this would involve pulling in these deps at the start of resolution
+        base.base
+            .makedepends
+            .iter()
+            .chain(check)
+            .filter(|v| v.supports(arch))
+            .flat_map(|d| &d.vec)
+            .any(|d| d == dep)
     }
 
     fn push_aur_build(&mut self, pkgbase: &str, pkg: AurPackage) {
