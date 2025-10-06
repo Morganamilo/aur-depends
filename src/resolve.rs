@@ -998,10 +998,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             });
             let pkgbuild_pkgs = pkgbuild_pkgs
                 .iter()
-                .map(|p| Targ {
-                    repo: None,
-                    pkg: p.as_str(),
-                })
+                .map(|p| Targ::new(None, p))
                 .collect::<Vec<_>>();
 
             new_pkgs = self
@@ -1042,21 +1039,22 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 } else if self.assume_installed(&dep) {
                     continue;
                 }
+
+                new_resolved.insert(dep.to_string());
                 if self.find_pkgbuild_repo_dep(None, &dep).is_some() {
                     pkgbuilds.push(dep.to_depend());
                     continue;
                 }
 
-                new_resolved.insert(dep.to_string());
                 ret.push(pkg.to_string());
             }
         }
 
+        self.resolved.extend(new_resolved);
         for dep in pkgbuilds {
             ret.extend(self.find_aur_deps_of_pkgbuild(Targ::new(None, &dep.to_string())));
         }
 
-        self.resolved.extend(new_resolved);
         ret
     }
 
