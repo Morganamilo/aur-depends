@@ -123,8 +123,8 @@ impl<'a> AurOrPkgbuild<'a> {
                     .map(|s| s.as_str())
                     .collect()
             }
-            AurOrPkgbuild::Pkgbuild(_, base, pkg) => {
-                let base = &base.base;
+            AurOrPkgbuild::Pkgbuild(_, src, pkg) => {
+                let base = &src.base;
                 let check = if check_depends {
                     Some(&base.checkdepends)
                 } else {
@@ -134,6 +134,7 @@ impl<'a> AurOrPkgbuild<'a> {
                 base.makedepends
                     .iter()
                     .chain(check.into_iter().flatten())
+                    .chain(&src.pkg.depends)
                     .chain(&pkg.depends)
                     .filter(|d| d.arch.is_none() || d.arch.as_deref() == Some(arch))
                     .flat_map(|d| &d.vec)
