@@ -1,4 +1,4 @@
-use crate::{Base, satisfies::Satisfies};
+use crate::{satisfies::Satisfies, Base};
 
 use std::collections::{HashMap, HashSet};
 
@@ -123,7 +123,10 @@ impl Conflict {
             None
         };
 
-        self.conflicting.push(Conflicting { pkg, conflict });
+        let conflicting = Conflicting { pkg, conflict };
+        if !self.conflicting.contains(&conflicting) {
+            self.conflicting.push(conflicting);
+        }
     }
 }
 
