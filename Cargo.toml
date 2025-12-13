@@ -1,6 +1,6 @@
 [package]
 name = "aur-depends"
-version = "4.0.4"
+version = "5.0.0"
 authors = ["morganamilo <m?organamilo@gmail.com>"]
 edition = "2024"
 
@@ -16,8 +16,8 @@ exclude = ["tests"]
 features = [ "docs-rs" ]
 
 [dependencies]
-alpm = "4.0.3"
-alpm-utils = "4.0.1"
+alpm = "5.0.0"
+alpm-utils = "5.0.0"
 log = "0.4.28"
 raur = { version = "7.0.0", default-features = false, features = ["async"] }
 bitflags = "2.9.4"
