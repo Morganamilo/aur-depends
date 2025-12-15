@@ -267,10 +267,8 @@ impl<'a> Actions<'a> {
                 .pkg
                 .conflicts
                 .iter()
-                .filter(|c| {
-                    c.arch.is_none() || c.arch.as_deref() == self.alpm.architectures().first()
-                })
-                .flat_map(|c| &c.vec)
+                .filter(|c| c.arch().is_none() || c.arch() == self.alpm.architectures().first())
+                .flat_map(|c| c.values())
             {
                 self.check_forward_conflict(
                     &pkg.pkg.pkgname,
@@ -316,10 +314,8 @@ impl<'a> Actions<'a> {
                 .pkg
                 .conflicts
                 .iter()
-                .filter(|c| {
-                    c.arch.is_none() || c.arch.as_deref() == self.alpm.architectures().first()
-                })
-                .flat_map(|c| &c.vec)
+                .filter(|c| c.arch().is_none() || c.arch() == self.alpm.architectures().first())
+                .flat_map(|c| c.values())
             {
                 self.check_reverse_conflict(
                     &pkg.pkg.pkgname,

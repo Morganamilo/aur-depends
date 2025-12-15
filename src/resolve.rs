@@ -2,7 +2,7 @@ use crate::actions::{Actions, AurPackage, DepMissing, Missing, RepoPackage, Unne
 use crate::base::Base;
 use crate::cb::{Group, GroupCB, IsDevelCb, ProviderCB};
 use crate::pkgbuild::PkgbuildRepo;
-use crate::satisfies::{satisfies_provide, Satisfies};
+use crate::satisfies::{Satisfies, satisfies_provide};
 use crate::{AurBase, Error, Pkgbuild, PkgbuildPackages};
 
 use std::collections::HashSet;
@@ -135,8 +135,8 @@ impl<'a> AurOrPkgbuild<'a> {
                     .iter()
                     .chain(check.into_iter().flatten())
                     .chain(&pkg.depends)
-                    .filter(|d| d.arch.is_none() || d.arch.as_deref() == Some(arch))
-                    .flat_map(|d| &d.vec)
+                    .filter(|d| d.arch().is_none() || d.arch() == Some(arch))
+                    .flat_map(|d| d.values())
                     .map(|d| d.as_str())
                     .collect()
             }
@@ -1234,7 +1234,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         check_depends: bool,
     ) -> bool {
         let check = if check_depends {
-            base.base.checkdepends.as_slice()
+            &*base.base.checkdepends
         } else {
             &[]
         };
@@ -1246,7 +1246,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             .iter()
             .chain(check)
             .filter(|v| v.supports(arch))
-            .flat_map(|d| &d.vec)
+            .flat_map(|d| d.values())
             .any(|d| d == dep)
     }
 
@@ -1349,10 +1349,9 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                         .depends
                         .iter()
                         .filter(|d| {
-                            d.arch.is_none()
-                                || d.arch.as_deref() == self.alpm.architectures().first()
+                            d.arch().is_none() || d.arch() == self.alpm.architectures().first()
                         })
-                        .flat_map(|d| &d.vec)
+                        .flat_map(|d| d.values())
                         .map(|d| Depend::new(d.as_str())),
                 )
             });
@@ -1416,8 +1415,8 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                                     pkg.pkg
                                         .depends
                                         .iter()
-                                        .filter(|d| d.arch.is_none() || d.arch.as_deref() == arch)
-                                        .flat_map(|d| &d.vec)
+                                        .filter(|d| d.arch().is_none() || d.arch() == arch)
+                                        .flat_map(|d| d.values())
                                         .map(|d| Depend::new(d.as_str())),
                                 );
                             }
@@ -1444,8 +1443,8 @@ fn is_ver_char(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::*;
     use crate::Conflict;
+    use crate::tests::*;
     use alpm::SigLevel;
     use simplelog::{ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode};
 
@@ -1488,7 +1487,7 @@ mod tests {
         let raur = raur();
         let alpm = alpm();
         let mut cache = HashSet::new();
-        let srcinfo = srcinfo::Srcinfo::parse_file("tests/srcinfo/custom.SRCINFO").unwrap();
+        let srcinfo = srcinfo::Srcinfo::from_path("tests/srcinfo/custom.SRCINFO").unwrap();
         let srcinfo = vec![&srcinfo];
 
         let repo = vec![PkgbuildRepo {
