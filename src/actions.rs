@@ -241,7 +241,7 @@ impl<'a> Actions<'a> {
             }
 
             for conflict in pkg.pkg.conflicts() {
-                self.check_forward_conflict(pkg.pkg.name(), &conflict, conflicts);
+                self.check_forward_conflict(pkg.pkg.name(), conflict, conflicts);
             }
         }
 
@@ -286,7 +286,7 @@ impl<'a> Actions<'a> {
             }
 
             for conflict in pkg.pkg.conflicts() {
-                self.check_reverse_conflict(pkg.pkg.name(), runtime, &conflict, conflicts)
+                self.check_reverse_conflict(pkg.pkg.name(), runtime, conflict, conflicts)
             }
         }
 
@@ -335,7 +335,7 @@ impl<'a> Actions<'a> {
             .filter(|pkg| !self.has_pkg(pkg.name()))
             .for_each(|pkg| {
                 pkg.conflicts().iter().for_each(|conflict| {
-                    self.check_reverse_conflict(pkg.name(), runtime, &conflict, conflicts)
+                    self.check_reverse_conflict(pkg.name(), runtime, conflict, conflicts)
                 })
             });
     }
@@ -391,16 +391,13 @@ impl<'a> Actions<'a> {
         let build = self.iter_aur_pkgs().map(|pkg| pkg.pkg.name.as_str());
         let pkgbuilds = self.iter_pkgbuilds().map(|pkg| pkg.1.pkg.pkgname.as_str());
 
-        let duplicates = self
-            .install
+        self.install
             .iter()
             .map(|pkg| pkg.pkg.name())
             .chain(build)
             .chain(pkgbuilds)
             .filter(|&name| !names.insert(name))
             .map(Into::into)
-            .collect::<Vec<_>>();
-
-        duplicates
+            .collect::<Vec<_>>()
     }
 }

@@ -453,15 +453,13 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         if self.flags.contains(Flags::NEEDED) || !is_target {
             let is_devel = self.is_devel.get().map(|f| f(aur_pkg)).unwrap_or(false);
 
-            if !is_devel {
-                if let Ok(local) = localdb.pkg(&*pkg.name) {
-                    if local.version() >= Version::new(&*pkg.version) {
-                        let unneeded =
-                            Unneeded::new(aur_pkg.to_string(), local.version().to_string());
-                        self.actions.unneeded.push(unneeded);
-                        return Ok(());
-                    }
-                }
+            if !is_devel
+                && let Ok(local) = localdb.pkg(&*pkg.name)
+                && local.version() >= Version::new(&*pkg.version)
+            {
+                let unneeded = Unneeded::new(aur_pkg.to_string(), local.version().to_string());
+                self.actions.unneeded.push(unneeded);
+                return Ok(());
             }
         }
 
@@ -505,14 +503,13 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             return;
         }
 
-        if self.flags.contains(Flags::NEEDED) {
-            if let Ok(local) = localdb.pkg(alpm_pkg.name()) {
-                if local.version() >= alpm_pkg.version() {
-                    let unneeded = Unneeded::new(pkg.to_string(), local.version().to_string());
-                    self.actions.unneeded.push(unneeded);
-                    return;
-                }
-            }
+        if self.flags.contains(Flags::NEEDED)
+            && let Ok(local) = localdb.pkg(alpm_pkg.name())
+            && local.version() >= alpm_pkg.version()
+        {
+            let unneeded = Unneeded::new(pkg.to_string(), local.version().to_string());
+            self.actions.unneeded.push(unneeded);
+            return;
         }
 
         let is_make = make.contains(&pkg.pkg);
@@ -557,15 +554,13 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 .map(|f| f(pkgbuild.pkg))
                 .unwrap_or(false);
 
-            if !is_devel {
-                if let Ok(local) = localdb.pkg(&*pkg.pkgname) {
-                    if local.version() >= Version::new(base.version()) {
-                        let unneeded =
-                            Unneeded::new(pkgbuild.to_string(), local.version().to_string());
-                        self.actions.unneeded.push(unneeded);
-                        return Ok(());
-                    }
-                }
+            if !is_devel
+                && let Ok(local) = localdb.pkg(&*pkg.pkgname)
+                && local.version() >= Version::new(base.version())
+            {
+                let unneeded = Unneeded::new(pkgbuild.to_string(), local.version().to_string());
+                self.actions.unneeded.push(unneeded);
+                return Ok(());
             }
         }
 
@@ -615,10 +610,10 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             return Some(pkg);
         }
 
-        if let Some(pkg) = self.cache.get(dep.name()) {
-            if pkg.satisfies_dep(dep, self.flags.contains(Flags::NO_DEP_VERSION)) {
-                return Some(pkg);
-            }
+        if let Some(pkg) = self.cache.get(dep.name())
+            && pkg.satisfies_dep(dep, self.flags.contains(Flags::NO_DEP_VERSION))
+        {
+            return Some(pkg);
         }
 
         self.cache
@@ -708,7 +703,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 let same_pkgbuild = matches!(pkg, AurOrPkgbuild::Pkgbuild(_, base, _) if base
                         .which_satisfies_dep(&dep, nover)
                         .is_some()
-                    && !self.pkgbuild_dep_in_base(&dep.to_string(), &base, arch, check));
+                    && !self.pkgbuild_dep_in_base(&dep.to_string(), base, arch, check));
 
                 let is_aur_targ = !same_pkgbuild && self.dep_is_aur_targ(targs, &dep);
                 self.resolved.insert(dep.to_string());
@@ -761,10 +756,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 let sat_pkg = if let Some(pkg) = self.select_satisfier_aur_cache(&dep, false) {
                     pkg.clone()
                 } else {
-                    debug!(
-                        "failed to find '{}' in pkgbuild repo or aur cache",
-                        dep.to_string(),
-                    );
+                    debug!("failed to find '{}' in pkgbuild repo or aur cache", dep,);
                     if log_enabled!(Debug) {
                         debug!(
                             "at time of failure pkgcache is: {:?}\n",
@@ -812,7 +804,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 if let Some(pkg) =
                     base.which_satisfies_dep(dep, self.flags.contains(Flags::NO_DEP_VERSION))
                 {
-                    return Some((&repo.name, base, base.pkg(pkg).unwrap()));
+                    return Some((repo.name, base, base.pkg(pkg).unwrap()));
                 }
             }
         }
@@ -843,9 +835,9 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
         if !self.flags.contains(Flags::NO_DEPS) {
             for dep in pkg.depends() {
-                if self.satisfied_install(&dep)
-                    || self.satisfied_local(&dep)
-                    || self.assume_installed(&dep)
+                if self.satisfied_install(dep)
+                    || self.satisfied_local(dep)
+                    || self.assume_installed(dep)
                 {
                     continue;
                 }
@@ -1158,10 +1150,10 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     }
 
     fn satisfied_local(&self, target: &Dep) -> bool {
-        if let Ok(pkg) = self.alpm.localdb().pkg(target.name()) {
-            if pkg.satisfies_dep(target, self.flags.contains(Flags::NO_DEP_VERSION)) {
-                return true;
-            }
+        if let Ok(pkg) = self.alpm.localdb().pkg(target.name())
+            && pkg.satisfies_dep(target, self.flags.contains(Flags::NO_DEP_VERSION))
+        {
+            return true;
         }
 
         if self.flags.contains(Flags::NO_DEP_VERSION) {
@@ -1254,19 +1246,19 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         debug!("pushing to build: {}", pkg.pkg.name);
         let mut build = true;
 
-        if let Some(Base::Aur(base)) = self.actions.build.last_mut() {
-            if base.package_base() == pkgbase {
-                base.pkgs.push(pkg);
-                return;
-            }
+        if let Some(Base::Aur(base)) = self.actions.build.last_mut()
+            && base.package_base() == pkgbase
+        {
+            base.pkgs.push(pkg);
+            return;
         }
 
         for base in self.actions.build.iter_mut() {
-            if let Base::Aur(pkgs) = base {
-                if pkgs.pkgs[0].pkg.package_base == pkgbase {
-                    build = false;
-                    break;
-                }
+            if let Base::Aur(pkgs) = base
+                && pkgs.pkgs[0].pkg.package_base == pkgbase
+            {
+                build = false;
+                break;
             }
         }
 
@@ -1281,19 +1273,19 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         debug!("pushing to build: {}", pkg.pkg.pkgname);
         let mut b = true;
 
-        if let Some(Base::Pkgbuild(b)) = self.actions.build.last_mut() {
-            if b.package_base() == base.base.pkgbase {
-                b.pkgs.push(pkg);
-                return;
-            }
+        if let Some(Base::Pkgbuild(b)) = self.actions.build.last_mut()
+            && b.package_base() == base.base.pkgbase
+        {
+            b.pkgs.push(pkg);
+            return;
         }
 
         for build in self.actions.build.iter_mut() {
-            if let Base::Pkgbuild(pkgs) = build {
-                if pkgs.srcinfo.base.pkgbase == base.base.pkgbase {
-                    b = false;
-                    break;
-                }
+            if let Base::Pkgbuild(pkgs) = build
+                && pkgs.srcinfo.base.pkgbase == base.base.pkgbase
+            {
+                b = false;
+                break;
             }
         }
 
@@ -1432,7 +1424,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         self.alpm
             .assume_installed()
             .iter()
-            .any(|assume| satisfies_provide(dep, &assume, nover))
+            .any(|assume| satisfies_provide(dep, assume, nover))
     }
 }
 
@@ -1500,11 +1492,7 @@ mod tests {
             .aur_namespace(true)
             .provider_callback(|_, pkgs| {
                 debug!("provider choice: {:?}", pkgs);
-                if let Some(i) = pkgs.iter().position(|pkg| *pkg == "yay-bin") {
-                    i
-                } else {
-                    0
-                }
+                pkgs.iter().position(|pkg| *pkg == "yay-bin").unwrap_or_default()
             });
 
         let actions = handle.resolve_targets(pkgs).await.unwrap();
