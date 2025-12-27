@@ -42,7 +42,7 @@ impl Satisfies for srcinfo::Srcinfo {
             let provides = pkg
                 .provides
                 .iter()
-                .flat_map(|p| &p.vec)
+                .flat_map(|p| p.values())
                 .map(|p| Depend::new(p.as_str()));
 
             satisfies(
@@ -63,7 +63,7 @@ impl Satisfies for (&srcinfo::Srcinfo, &srcinfo::Package) {
             .1
             .provides
             .iter()
-            .flat_map(|p| &p.vec)
+            .flat_map(|p| p.values())
             .map(|p| Depend::new(p.as_str()));
 
         satisfies(

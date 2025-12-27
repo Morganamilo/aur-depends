@@ -53,7 +53,7 @@ impl MockRaur {
         }
     }
 
-    pub fn pkg<S: Into<String>>(&mut self, name: S) -> MockPackage {
+    pub fn pkg<S: Into<String>>(&mut self, name: S) -> MockPackage<'_> {
         let name = name.into();
         let pkg = Package {
             id: 0,
