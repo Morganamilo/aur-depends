@@ -1,6 +1,6 @@
 [package]
 name = "aur-depends"
-version = "4.0.5"
+version = "5.0.0"
 authors = ["morganamilo <m?organamilo@gmail.com>"]
 edition = "2024"
 
