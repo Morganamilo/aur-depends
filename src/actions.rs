@@ -1,4 +1,4 @@
-use crate::{satisfies::Satisfies, Base};
+use crate::{Base, satisfies::Satisfies};
 
 use std::collections::{HashMap, HashSet};
 
@@ -276,11 +276,7 @@ impl<'a> Actions<'a> {
             }
 
             for conflict in pkg.pkg.conflicts.arch(self.arch()) {
-                self.check_forward_conflict(
-                    &pkg.pkg.pkgname,
-                    &Depend::new(conflict),
-                    conflicts,
-                );
+                self.check_forward_conflict(&pkg.pkg.pkgname, &Depend::new(conflict), conflicts);
             }
         }
     }
@@ -316,11 +312,7 @@ impl<'a> Actions<'a> {
                 continue;
             }
 
-            for conflict in pkg
-                .pkg
-                .conflicts
-                .arch(self.arch())
-            {
+            for conflict in pkg.pkg.conflicts.arch(self.arch()) {
                 self.check_reverse_conflict(
                     &pkg.pkg.pkgname,
                     runtime,
