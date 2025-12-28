@@ -126,19 +126,15 @@ impl<'a> AurOrPkgbuild<'a> {
             AurOrPkgbuild::Pkgbuild(_, src, pkg) => {
                 let base = &src.base;
                 let check = if check_depends {
-                    Some(&base.checkdepends)
+                    Some(base.checkdepends.arch(arch))
                 } else {
                     None
                 };
 
-                base.makedepends
-                    .iter()
+                base.makedepends.arch(arch)
                     .chain(check.into_iter().flatten())
-                    .chain(&src.pkg.depends)
-                    .chain(&pkg.depends)
-                    .filter(|d| d.arch().is_none() || d.arch() == Some(arch))
-                    .flat_map(|d| d.values())
-                    .map(|d| d.as_str())
+                    .chain(src.pkg.depends.arch(arch))
+                    .chain(pkg.depends.arch(arch))
                     .collect()
             }
         }
@@ -686,10 +682,9 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     ) -> Result<(), Error> {
         debug!("resolve pkgbuild repo pkg deps: {}", pkg.pkgbase());
         let nover = self.flags.contains(Flags::NO_DEP_VERSION);
-        let arch = self.alpm.architectures().first().unwrap_or("");
         let check = self.flags.contains(Flags::CHECK_DEPENDS);
         if !self.flags.contains(Flags::NO_DEPS) {
-            for dep_str in pkg.depends(arch, check) {
+            for dep_str in pkg.depends(self.arch(), check) {
                 debug!("depend: {}", dep_str);
                 let dep = Depend::new(dep_str.to_string());
 
@@ -704,7 +699,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 let same_pkgbuild = matches!(pkg, AurOrPkgbuild::Pkgbuild(_, base, _) if base
                         .which_satisfies_dep(&dep, nover)
                         .is_some()
-                    && !self.pkgbuild_dep_in_base(&dep.to_string(), base, arch, check));
+                    && !self.pkgbuild_dep_in_base(&dep.to_string(), base, self.arch(), check));
 
                 let is_aur_targ = !same_pkgbuild && self.dep_is_aur_targ(targs, &dep);
                 self.resolved.insert(dep.to_string());
@@ -1012,9 +1007,8 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
         let pkg = Depend::new(targ.pkg);
         if let Some((repo, base, pkg)) = self.find_pkgbuild_repo_dep(targ.repo, &pkg) {
-            let arch = self.alpm.architectures().first().unwrap_or("");
             let pkgbuild = AurOrPkgbuild::Pkgbuild(repo, base, pkg);
-            let deps = pkgbuild.depends(arch, self.flags.contains(Flags::CHECK_DEPENDS));
+            let deps = pkgbuild.depends(self.arch(), self.flags.contains(Flags::CHECK_DEPENDS));
 
             for pkg in deps {
                 let dep = Depend::new(pkg);
@@ -1322,7 +1316,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         let mut runtime = Vec::new();
         let mut run = true;
         let no_dep_ver = self.flags.contains(Flags::NO_DEP_VERSION);
-        let arch = self.alpm.architectures().first();
+        let arch = self.arch().to_string();
 
         self.actions
             .install
@@ -1340,12 +1334,8 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                 runtime.extend(
                     p.1.pkg
                         .depends
-                        .iter()
-                        .filter(|d| {
-                            d.arch().is_none() || d.arch() == self.alpm.architectures().first()
-                        })
-                        .flat_map(|d| d.values())
-                        .map(|d| Depend::new(d.as_str())),
+                        .arch(&arch)
+                        .map(Depend::new),
                 )
             });
 
@@ -1407,10 +1397,8 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                                 runtime.extend(
                                     pkg.pkg
                                         .depends
-                                        .iter()
-                                        .filter(|d| d.arch().is_none() || d.arch() == arch)
-                                        .flat_map(|d| d.values())
-                                        .map(|d| Depend::new(d.as_str())),
+                                        .arch(&arch)
+                                        .map(Depend::new),
                                 );
                             }
                         }
@@ -1427,6 +1415,16 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             .iter()
             .any(|assume| satisfies_provide(dep, assume, nover))
     }
+
+    fn arch(&self) -> &str {
+        // Assume first alpm arch is our makepkg carch because we can't parse the makepkg config
+        // there's always one configured realisticly. If there's not this resolves to empty string
+        // and then the call to ArchVecs::arch will just give us the any fields and this still works
+        // even if it's not ideal.
+        // TODO make the user explicitly configure an arch and pawn the problem off.
+        self.alpm.architectures().first().unwrap_or_default()
+    }
+
 }
 
 fn is_ver_char(c: char) -> bool {

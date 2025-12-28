@@ -167,6 +167,15 @@ impl<'a> Actions<'a> {
             || install.iter().any(|pkg| pkg.pkg.name() == name)
     }
 
+    fn arch(&self) -> &str {
+        // Assume first alpm arch is our makepkg carch because we can't parse the makepkg config
+        // there's always one configured realisticly. If there's not this resolves to empty string
+        // and then the call to ArchVecs::arch will just give us the any fields and this still works
+        // even if it's not ideal.
+        // TODO make the user explicitly configure an arch and pawn the problem off.
+        self.alpm.architectures().first().unwrap_or_default()
+    }
+
     // check a conflict from locally installed pkgs, against install+build
     fn check_reverse_conflict<S: AsRef<str>>(
         &self,
@@ -266,16 +275,10 @@ impl<'a> Actions<'a> {
                 continue;
             }
 
-            for conflict in pkg
-                .pkg
-                .conflicts
-                .iter()
-                .filter(|c| c.arch().is_none() || c.arch() == self.alpm.architectures().first())
-                .flat_map(|c| c.values())
-            {
+            for conflict in pkg.pkg.conflicts.arch(self.arch()) {
                 self.check_forward_conflict(
                     &pkg.pkg.pkgname,
-                    &Depend::new(conflict.clone()),
+                    &Depend::new(conflict),
                     conflicts,
                 );
             }
@@ -316,9 +319,7 @@ impl<'a> Actions<'a> {
             for conflict in pkg
                 .pkg
                 .conflicts
-                .iter()
-                .filter(|c| c.arch().is_none() || c.arch() == self.alpm.architectures().first())
-                .flat_map(|c| c.values())
+                .arch(self.arch())
             {
                 self.check_reverse_conflict(
                     &pkg.pkg.pkgname,
