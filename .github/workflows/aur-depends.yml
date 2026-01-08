@@ -1,0 +1,78 @@
+name: aur-depends
+
+on:
+  push:
+    paths:
+      - 'src/*.rs'
+      - 'testdata/**'
+      - 'tests/**'
+      - 'Cargo.*'
+      - '.github/workflows/*'
+  pull_request:
+    paths:
+      - 'src/*.rs'
+      - 'tests/**'
+      - 'Cargo.*'
+      - '.github/workflows/*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux
+    steps:
+      - name: Install Packages
+        run: pacman -Syu rust clang gcc git libarchive pkgconf sudo fakeroot --noconfirm --needed
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Format
+        run: cargo fmt -- --check
+
+      - name: Build
+        run: cargo build --locked --features generate
+
+      - name: Test
+        run: sudo -u nobody XDG_STATE_HOME=/tmp CARGO_HOME=/tmp/cargo cargo test --locked --features generate --target-dir=/tmp -- --nocapture
+
+
+  test-git:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux
+    steps:
+      - name: Install Packages
+        run: pacman -Syu rust curl clang git base-devel libarchive meson asciidoc doxygen fakechroot pkgconf --noconfirm --needed
+
+      - name: Install Pacman-git
+        run: |
+          git clone https://aur.archlinux.org/pacman-git
+          chown -R nobody pacman-git
+          cd pacman-git
+          sudo -u nobody makepkg --nocheck
+          sudo -u nobody makepkg --packagelist > list
+          yes | pacman -U $(cat list)
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Format
+        run: cargo fmt -- --check
+
+      - name: Build
+        run: cargo build --locked --features git,generate
+
+      - name: Test
+        run: sudo -u nobody XDG_STATE_HOME=/tmp CARGO_HOME=/tmp/cargo cargo test --locked --features git,generate,mock --target-dir=/tmp -- --nocapture

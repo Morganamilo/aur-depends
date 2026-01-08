@@ -131,7 +131,8 @@ impl<'a> AurOrPkgbuild<'a> {
                     None
                 };
 
-                base.makedepends.arch(arch)
+                base.makedepends
+                    .arch(arch)
                     .chain(check.into_iter().flatten())
                     .chain(src.pkg.depends.arch(arch))
                     .chain(pkg.depends.arch(arch))
@@ -1330,14 +1331,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         self.actions
             .iter_pkgbuilds()
             .filter(|p| !p.1.make)
-            .for_each(|p| {
-                runtime.extend(
-                    p.1.pkg
-                        .depends
-                        .arch(&arch)
-                        .map(Depend::new),
-                )
-            });
+            .for_each(|p| runtime.extend(p.1.pkg.depends.arch(&arch).map(Depend::new)));
 
         runtime.sort_unstable_by_key(|a| a.to_string());
         runtime.dedup_by_key(|a| a.to_string());
@@ -1394,12 +1388,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
                             if satisfied {
                                 pkg.make = false;
                                 run = true;
-                                runtime.extend(
-                                    pkg.pkg
-                                        .depends
-                                        .arch(&arch)
-                                        .map(Depend::new),
-                                );
+                                runtime.extend(pkg.pkg.depends.arch(&arch).map(Depend::new));
                             }
                         }
                     }
@@ -1424,7 +1413,6 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         // TODO make the user explicitly configure an arch and pawn the problem off.
         self.alpm.architectures().first().unwrap_or_default()
     }
-
 }
 
 fn is_ver_char(c: char) -> bool {
@@ -1491,7 +1479,9 @@ mod tests {
             .aur_namespace(true)
             .provider_callback(|_, pkgs| {
                 debug!("provider choice: {:?}", pkgs);
-                pkgs.iter().position(|pkg| *pkg == "yay-bin").unwrap_or_default()
+                pkgs.iter()
+                    .position(|pkg| *pkg == "yay-bin")
+                    .unwrap_or_default()
             });
 
         let actions = handle.resolve_targets(pkgs).await.unwrap();
