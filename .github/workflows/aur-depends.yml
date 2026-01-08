@@ -75,4 +75,4 @@ jobs:
         run: cargo build --locked --features git,generate
 
       - name: Test
-        run: sudo -u nobody XDG_STATE_HOME=/tmp CARGO_HOME=/tmp/cargo cargo test --locked --features git,generate,mock --target-dir=/tmp -- --nocapture
+        run: sudo -u nobody XDG_STATE_HOME=/tmp CARGO_HOME=/tmp/cargo cargo test --locked --features git, generate --target-dir=/tmp -- --nocapture

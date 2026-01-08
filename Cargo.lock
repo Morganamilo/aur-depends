@@ -23,9 +23,9 @@ dependencies = [
 
 [[package]]
 name = "alpm-sys"
-version = "5.0.0"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7364aaf7673e679a2616e26c78af26b922b69afeba965333386f7d0400daf3a3"
+checksum = "2802ef5d74e47cceda08d0d583c69be2595a5d25e2d6eef349b5e5b5ed4560e9"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -1122,9 +1122,9 @@ dependencies = [
 
 [[package]]
 name = "srcinfo"
-version = "2.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14f29fdcb179775cea4ae5a5340cb8d3b02714b8cf5d693ee0d07c62bd6141e9"
+checksum = "f2f8e6fa7b2376b02839a9fa290dfb4944c441ff9bac51fb4618647232b54d17"
 
 [[package]]
 name = "stable_deref_trait"
