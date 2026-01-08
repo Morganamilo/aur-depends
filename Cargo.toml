@@ -16,7 +16,7 @@ exclude = ["tests"]
 features = [ "docs-rs" ]
 
 [dependencies]
-alpm = "5.0.0"
+alpm = "5.0.2"
 alpm-utils = "5.0.0"
 log = "0.4.29"
 raur = { version = "7.0.0", default-features = false, features = ["async"] }
