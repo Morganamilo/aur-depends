@@ -19,7 +19,7 @@ features = [ "docs-rs" ]
 alpm = "5.0.2"
 alpm-utils = "5.0.0"
 log = "0.4.29"
-raur = { version = "7.0.0", default-features = false, features = ["async"] }
+raur = { version = "8.0.0", default-features = false, features = ["async"] }
 bitflags = "2.10.0"
 srcinfo = "2.0.0"
 
