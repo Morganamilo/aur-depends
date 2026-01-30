@@ -54,15 +54,28 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
     ) -> Vec<&'c alpm::Package> {
         let dbs = alpm.syncdbs();
 
-        if let Some(local) = local {
-            local.iter().flat_map(|db| db.pkgs()).collect()
-        } else {
-            alpm.localdb()
-                .pkgs()
-                .into_iter()
-                .filter(|p| dbs.pkg(p.name()).is_err())
-                .collect()
-        }
+        alpm.localdb()
+            .pkgs()
+            .into_iter()
+            .filter(|p| {
+                for db in dbs.iter() {
+                    if db.pkg(p.name()).is_ok() {
+                        let is_local_repo = local
+                            .as_ref()
+                            .map_or(false, |l| l.iter().any(|ld| ld.name() == db.name()));
+                        if !is_local_repo {
+                            return false;
+                        }
+                    }
+                }
+                if let Some(ref local) = local {
+                    if local.pkg(p.name()).is_ok() {
+                        return true;
+                    }
+                }
+                dbs.pkg(p.name()).is_err()
+            })
+            .collect()
     }
 
     /// Get aur packages need to be updated.

@@ -1920,6 +1920,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_aur_updates_with_local_repos() {
+        let alpm = Alpm::new("/", "tests/db").unwrap();
+        alpm.register_syncdb("core", SigLevel::NONE).unwrap();
+        alpm.register_syncdb("extra", SigLevel::NONE).unwrap();
+        alpm.register_syncdb("community", SigLevel::NONE).unwrap();
+        alpm.register_syncdb("multilib", SigLevel::NONE).unwrap();
+        alpm.register_syncdb("local-repo", SigLevel::NONE).unwrap();
+
+        let raur = raur();
+        let mut cache = HashSet::new();
+        let mut handle = Resolver::new(
+            &alpm,
+            &mut cache,
+            &raur,
+            Flags::new() | Flags::ENABLE_DOWNGRADE,
+        );
+        let pkgs = handle
+            .updates(Some(&["local-repo"]))
+            .await
+            .unwrap()
+            .aur_updates;
+        let mut pkgs = pkgs
+            .iter()
+            .map(|p| p.remote.name.as_str())
+            .collect::<Vec<_>>();
+        pkgs.sort();
+
+        assert_eq!(pkgs, vec!["pacaur", "version_newer", "version_older"]);
+    }
+
+    #[tokio::test]
+    async fn test_aur_updates_excludes_official_in_local_repo() {
+        let alpm = Alpm::new("/", "tests/db").unwrap();
+        alpm.register_syncdb("core", SigLevel::NONE).unwrap();
+        alpm.register_syncdb("extra", SigLevel::NONE).unwrap();
+        alpm.register_syncdb("community", SigLevel::NONE).unwrap();
+        alpm.register_syncdb("multilib", SigLevel::NONE).unwrap();
+        alpm.register_syncdb("local-repo-with-official", SigLevel::NONE)
+            .unwrap();
+
+        let mut mock_raur = crate::tests::MockRaur::new();
+        mock_raur.pkg("version_newer").version("100-1");
+        mock_raur.pkg("glibc").version("999-1");
+
+        let mut cache = HashSet::new();
+        let mut handle = Resolver::new(&alpm, &mut cache, &mock_raur, Flags::new());
+        let pkgs = handle
+            .updates(Some(&["local-repo-with-official"]))
+            .await
+            .unwrap()
+            .aur_updates;
+        let pkgs = pkgs
+            .iter()
+            .map(|p| p.remote.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(pkgs, vec!["version_newer"]);
+    }
+
+    #[tokio::test]
     async fn test_repo_nover() {
         let TestActions { install, .. } = resolve(&["repo_version_test"], Flags::new()).await;
         assert_eq!(install, Vec::<String>::new());
