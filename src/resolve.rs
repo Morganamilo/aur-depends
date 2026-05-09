@@ -2091,7 +2091,10 @@ mod tests {
                 .iter()
                 .map(|b| (
                     b.package_base().to_string(),
-                    b.pkgs.iter().map(|p| p.pkg.name.clone()).collect::<Vec<_>>(),
+                    b.pkgs
+                        .iter()
+                        .map(|p| p.pkg.name.clone())
+                        .collect::<Vec<_>>(),
                     b.build,
                 ))
                 .collect::<Vec<_>>()
@@ -2104,6 +2107,67 @@ mod tests {
         );
 
         let mut names: Vec<&str> = merged.pkgs.iter().map(|p| p.pkg.name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, vec!["split-dkms", "split-utils"]);
+    }
+
+    /// Same regression as the AUR variant above, but for pkgbuild repos.
+    /// split-dkms has a runtime dep on split-extra (separate pkgbase) which
+    /// gets pushed between split-utils and split-dkms, defeating the
+    /// last_mut() fast path and exercising the loop branch.
+    #[tokio::test]
+    async fn test_split_pkgbase_pkgbuild_merges_when_resolved_non_consecutively() {
+        let raur = raur();
+        let alpm = alpm();
+        let mut cache = HashSet::new();
+        let split_base = srcinfo::Srcinfo::from_path("tests/srcinfo/split-base.SRCINFO").unwrap();
+        let split_extra = srcinfo::Srcinfo::from_path("tests/srcinfo/split-extra.SRCINFO").unwrap();
+        let repo = vec![PkgbuildRepo {
+            name: "test_repo",
+            pkgs: vec![&split_base, &split_extra],
+        }];
+        let handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new()).pkgbuild_repos(repo);
+        let actions = handle
+            .resolve_targets(&["split-utils", "split-dkms"])
+            .await
+            .unwrap();
+
+        let pkgbuild_bases: Vec<&PkgbuildPackages> = actions
+            .build
+            .iter()
+            .filter_map(|b| match b {
+                Base::Pkgbuild(p) => Some(p),
+                _ => None,
+            })
+            .collect();
+
+        let split_bases: Vec<&&PkgbuildPackages> = pkgbuild_bases
+            .iter()
+            .filter(|b| b.package_base() == "split-base")
+            .collect();
+
+        assert_eq!(
+            split_bases.len(),
+            1,
+            "expected exactly one Base for pkgbase split-base, got {}: {:?}",
+            split_bases.len(),
+            pkgbuild_bases
+                .iter()
+                .map(|b| (
+                    b.package_base().to_string(),
+                    b.pkgs
+                        .iter()
+                        .map(|p| p.pkg.pkgname.clone())
+                        .collect::<Vec<_>>(),
+                    b.build,
+                ))
+                .collect::<Vec<_>>()
+        );
+
+        let merged = split_bases[0];
+        assert!(merged.build);
+
+        let mut names: Vec<&str> = merged.pkgs.iter().map(|p| p.pkg.pkgname.as_str()).collect();
         names.sort();
         assert_eq!(names, vec!["split-dkms", "split-utils"]);
     }
