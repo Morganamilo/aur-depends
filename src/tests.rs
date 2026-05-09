@@ -116,6 +116,11 @@ impl<'a> MockPackage<'a> {
         self.0.version = s.into();
         self
     }
+
+    pub fn package_base<S: Into<String>>(self, s: S) -> Self {
+        self.0.package_base = s.into();
+        self
+    }
 }
 
 pub fn raur() -> impl Raur<Err = raur::Error> {
@@ -3314,6 +3319,18 @@ pub fn raur() -> impl Raur<Err = raur::Error> {
         .provide("perl-mailtools")
         .depend("perl-timedate");
     raur.pkg("perl-timedate-git").provide("perl-timedate");
+
+    raur.pkg("split-utils")
+        .package_base("split-base")
+        .version("1");
+    raur.pkg("split-dkms")
+        .package_base("split-base")
+        .version("1")
+        .depend("split-utils=1")
+        .make_depend("split-make-dep");
+    raur.pkg("split-make-dep")
+        .package_base("split-make-dep")
+        .version("1");
 
     raur
 }

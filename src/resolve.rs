@@ -1240,7 +1240,6 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
 
     fn push_aur_build(&mut self, pkgbase: &str, pkg: AurPackage) {
         debug!("pushing to build: {}", pkg.pkg.name);
-        let mut build = true;
 
         if let Some(Base::Aur(base)) = self.actions.build.last_mut()
             && base.package_base() == pkgbase
@@ -1250,17 +1249,17 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         }
 
         for base in self.actions.build.iter_mut() {
-            if let Base::Aur(pkgs) = base
-                && pkgs.pkgs[0].pkg.package_base == pkgbase
+            if let Base::Aur(existing) = base
+                && existing.package_base() == pkgbase
             {
-                build = false;
-                break;
+                existing.pkgs.push(pkg);
+                return;
             }
         }
 
         self.actions.build.push(Base::Aur(AurBase {
             pkgs: vec![pkg],
-            build,
+            build: true,
         }));
     }
 
@@ -2054,5 +2053,60 @@ mod tests {
     async fn test_target_flags() {
         let TestActions { targets, .. } = resolve(&["discord-canary"], Flags::new()).await;
         assert_eq!(targets, vec!["discord-canary"]);
+    }
+
+    /// Split-pkgbase members resolved non-consecutively (utils -> unrelated
+    /// make-dep -> dkms) must merge into one Base entry, else they ship in
+    /// separate pacman -U transactions and version-locked inter-pkg deps
+    /// break. See paru #1548, #1173.
+    #[tokio::test]
+    async fn test_split_pkgbase_merges_when_resolved_non_consecutively() {
+        let raur = raur();
+        let alpm = alpm();
+        let mut cache = HashSet::new();
+        let handle = Resolver::new(&alpm, &mut cache, &raur, Flags::new());
+        let actions = handle
+            .resolve_targets(&["split-utils", "split-dkms"])
+            .await
+            .unwrap();
+
+        let aur_bases: Vec<&AurBase> = actions
+            .build
+            .iter()
+            .filter_map(|b| match b {
+                Base::Aur(a) => Some(a),
+                _ => None,
+            })
+            .collect();
+
+        let split_bases: Vec<&&AurBase> = aur_bases
+            .iter()
+            .filter(|b| b.package_base() == "split-base")
+            .collect();
+
+        assert_eq!(
+            split_bases.len(),
+            1,
+            "expected exactly one Base for pkgbase split-base, got {}: {:?}",
+            split_bases.len(),
+            aur_bases
+                .iter()
+                .map(|b| (
+                    b.package_base().to_string(),
+                    b.pkgs.iter().map(|p| p.pkg.name.clone()).collect::<Vec<_>>(),
+                    b.build,
+                ))
+                .collect::<Vec<_>>()
+        );
+
+        let merged = split_bases[0];
+        assert!(
+            merged.build,
+            "merged Base must keep build=true so the pkgbase actually gets built"
+        );
+
+        let mut names: Vec<&str> = merged.pkgs.iter().map(|p| p.pkg.name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, vec!["split-dkms", "split-utils"]);
     }
 }
