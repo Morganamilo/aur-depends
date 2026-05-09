@@ -1,0 +1,10 @@
+pkgbase = split-base
+	pkgver = 1
+	pkgrel = 1
+	arch = any
+
+pkgname = split-utils
+
+pkgname = split-dkms
+	depends = split-extra
+	depends = split-utils=1
