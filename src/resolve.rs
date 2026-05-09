@@ -1263,24 +1263,22 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
         }));
     }
 
-    // TODO: multiple packages may have same pkgbase
     fn push_pkgbuild_build(&mut self, repo: String, base: srcinfo::Srcinfo, pkg: Pkgbuild) {
         debug!("pushing to build: {}", pkg.pkg.pkgname);
-        let mut b = true;
 
-        if let Some(Base::Pkgbuild(b)) = self.actions.build.last_mut()
-            && b.package_base() == base.base.pkgbase
+        if let Some(Base::Pkgbuild(existing)) = self.actions.build.last_mut()
+            && existing.package_base() == base.base.pkgbase
         {
-            b.pkgs.push(pkg);
+            existing.pkgs.push(pkg);
             return;
         }
 
         for build in self.actions.build.iter_mut() {
-            if let Base::Pkgbuild(pkgs) = build
-                && pkgs.srcinfo.base.pkgbase == base.base.pkgbase
+            if let Base::Pkgbuild(existing) = build
+                && existing.srcinfo.base.pkgbase == base.base.pkgbase
             {
-                b = false;
-                break;
+                existing.pkgs.push(pkg);
+                return;
             }
         }
 
@@ -1288,7 +1286,7 @@ impl<'a, 'b, E: std::error::Error + Sync + Send + 'static, H: Raur<Err = E> + Sy
             repo,
             srcinfo: Box::new(base),
             pkgs: vec![pkg],
-            build: b,
+            build: true,
         }));
     }
 
